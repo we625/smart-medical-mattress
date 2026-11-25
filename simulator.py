@@ -1,19 +1,12 @@
 """
-simulator.py – مولّد بيانات المحاكاة للمفرش الطبي الذكي
+simulator.py – مولّد بيانات المحاكاة للمفرش الطبي الذكي (ثنائي اللغة: العربية / الإنجليزية)
 
 يولّد:
-  • مصفوفة ضغط 16×8  (وحدة: ملم زئبق تقريبية) موزعة تشريحيًا على مناطق الجسم:
-      - الرأس: الصفوف 1–2 (الأعمدة الوسطى 3–6)
-      - الكتفان: الصفوف 3–4 (الأعمدة 2–7)
-      - الظهر: الصفوف 5–6 (الأعمدة الوسطى 3–6)
-      - الذراعان واليدان: الصفوف 4–9 (الأعمدة الطرفية اليمنى 1–2 واليسرى 7–8)
-      - الحوض: الصفوف 7–10 (الأعمدة الوسطى 3–6)
-      - الفخذان: الصفوف 11–13 (الأعمدة الوسطى 3–6)
-      - الساقان والكعبان/القدمان: الصفوف 14–16 (الأعمدة الوسطى 3–6)
-  • درجة حرارة سطح المفرش (°م)
+  • مصفوفة ضغط 16×8 موزعة تشريحيًا على مناطق الجسم الكاملة
+  • درجة حرارة سطح المفرش (°م / °C)
   • الرطوبة النسبية (%)
 
-يدعم 7 سيناريوهات محاكاة متكاملة لتقييم مخاطر تقرحات الفراش والظروف الحرارية.
+يعتمد مفاتيح داخلية ثابتة (Internal Keys) للسيناريوهات السبعة مع قاموس ترجمة منظم (ar / en).
 """
 
 from __future__ import annotations
@@ -24,98 +17,188 @@ import numpy as np
 
 ROWS, COLS = 16, 8
 
-ScenarioType = Literal[
-    "طبيعي",
-    "ضغط_حوض",
-    "ضغط_كعبين",
-    "ضغط_جانبي",
-    "تعرق_وحرارة",
-    "برودة",
-    "خطر_مركب",
+LangType = Literal["ar", "en"]
+
+ScenarioKey = Literal[
+    "normal",
+    "pelvis_pressure",
+    "heels_pressure",
+    "lateral_pressure",
+    "heat_sweat",
+    "cold_surface",
+    "compound_risk",
 ]
 
-SCENARIO_CATALOG: dict[ScenarioType, dict[str, str]] = {
-    "طبيعي": {
-        "label": "السيناريو الطبيعي",
-        "description": "توزيع ضغط متوازن على مناطق الجسم وحرارة ورطوبة ضمن النمط الطبيعي للمريض.",
+# توافق خلفي في حال تمرير مفاتيح عربية قديمة
+ScenarioType = ScenarioKey
+_LEGACY_SCENARIO_MAP: dict[str, ScenarioKey] = {
+    "طبيعي": "normal",
+    "ضغط_حوض": "pelvis_pressure",
+    "ضغط_كعبين": "heels_pressure",
+    "ضغط_جانبي": "lateral_pressure",
+    "تعرق_وحرارة": "heat_sweat",
+    "برودة": "cold_surface",
+    "خطر_مركب": "compound_risk",
+}
+
+SCENARIO_CATALOG: dict[ScenarioKey, dict] = {
+    "normal": {
         "badge_tone": "normal",
+        "label": {
+            "ar": "السيناريو الطبيعي",
+            "en": "Normal Baseline Scenario",
+        },
+        "description": {
+            "ar": "توزيع ضغط متوازن على مناطق الجسم وحرارة ورطوبة ضمن النمط الطبيعي للمريض.",
+            "en": "Balanced full-body pressure distribution with surface temperature and humidity within the patient's normal baseline.",
+        },
     },
-    "ضغط_حوض": {
-        "label": "ضغط مستمر على الحوض",
-        "description": "ارتفاع مستمر ومتصاعد للضغط في منطقة الحوض والعجز (الصفوف ٧–١٠).",
+    "pelvis_pressure": {
         "badge_tone": "danger",
+        "label": {
+            "ar": "ضغط مستمر على الحوض",
+            "en": "Sustained Pelvic Pressure",
+        },
+        "description": {
+            "ar": "ارتفاع مستمر ومتصاعد للضغط في منطقة الحوض والعجز (الصفوف ٧–١٠).",
+            "en": "Sustained, progressively rising pressure concentrated over the pelvis and sacral area (rows 7–10).",
+        },
     },
-    "ضغط_كعبين": {
-        "label": "ضغط على الكعبين والساقين",
-        "description": "تركّز الضغط في الصفوف السفلية لمنطقة الساقين والكعبين والقدمين (الصفوف ١٤–١٦).",
+    "heels_pressure": {
         "badge_tone": "danger",
+        "label": {
+            "ar": "ضغط على الكعبين والساقين",
+            "en": "Heels & Lower Legs Pressure",
+        },
+        "description": {
+            "ar": "تركّز الضغط في الصفوف السفلية لمنطقة الساقين والكعبين والقدمين (الصفوف ١٤–١٦).",
+            "en": "Localized pressure buildup across the lower legs, heels, and feet (rows 14–16).",
+        },
     },
-    "ضغط_جانبي": {
-        "label": "ضغط جانبي على الكتف والذراع واليد",
-        "description": "يحاكي استلقاء المريض طويلاً على جانب واحد مع ارتفاع الضغط على الكتف والذراع واليد.",
+    "lateral_pressure": {
         "badge_tone": "danger",
+        "label": {
+            "ar": "ضغط جانبي على الكتف والذراع واليد",
+            "en": "Lateral Shoulder, Arm & Hand Pressure",
+        },
+        "description": {
+            "ar": "يحاكي استلقاء المريض طويلاً على جانب واحد مع ارتفاع الضغط على الكتف والذراع واليد.",
+            "en": "Simulates prolonged side-lying posture with elevated pressure along the shoulder, arm, and hand.",
+        },
     },
-    "تعرق_وحرارة": {
-        "label": "تعرق ورطوبة وحرارة مرتفعة",
-        "description": "ارتفاع ملحوظ في رطوبة السطح وحرارته يستدعي التهوية والتبريد الآمن.",
+    "heat_sweat": {
         "badge_tone": "warn",
+        "label": {
+            "ar": "تعرق ورطوبة وحرارة مرتفعة",
+            "en": "High Moisture, Sweating & Heat",
+        },
+        "description": {
+            "ar": "ارتفاع ملحوظ في رطوبة السطح وحرارته يستدعي التهوية والتبريد الآمن.",
+            "en": "Elevated surface moisture and temperature requiring active ventilation and safe cooling.",
+        },
     },
-    "برودة": {
-        "label": "برودة وانخفاض حرارة السطح",
-        "description": "انخفاض غير معتاد في حرارة سطح المفرش يستدعي التدفئة الآمنة.",
+    "cold_surface": {
         "badge_tone": "cold",
+        "label": {
+            "ar": "برودة وانخفاض حرارة السطح",
+            "en": "Cold Surface / Low Temperature",
+        },
+        "description": {
+            "ar": "انخفاض غير معتاد في حرارة سطح المفرش يستدعي التدفئة الآمنة.",
+            "en": "Unusual drop in mattress surface temperature requiring safe medical warming.",
+        },
     },
-    "خطر_مركب": {
-        "label": "خطر مركّب (ضغط + رطوبة + حرارة)",
-        "description": "سيناريو طارئ يجمع بين الضغط المستمر والتعرق وارتفاع الحرارة (أعلى خطر لتقرحات الجلد).",
+    "compound_risk": {
         "badge_tone": "critical",
+        "label": {
+            "ar": "خطر مركّب (ضغط + رطوبة + حرارة)",
+            "en": "Compound Risk (Pressure + Moisture + Heat)",
+        },
+        "description": {
+            "ar": "سيناريو طارئ يجمع بين الضغط المستمر والتعرق وارتفاع الحرارة (أعلى خطر لتقرحات الجلد).",
+            "en": "Emergency scenario combining sustained pelvic pressure with sweating and elevated heat (highest ulcer risk).",
+        },
     },
 }
 
-SCENARIO_ORDER: list[ScenarioType] = list(SCENARIO_CATALOG.keys())
+SCENARIO_ORDER: list[ScenarioKey] = list(SCENARIO_CATALOG.keys())
+
+CELL_REGION_LABELS: dict[str, dict[LangType, str]] = {
+    "right_arm_hand": {"ar": "الذراع واليد اليمنى", "en": "Right Arm & Hand"},
+    "right_shoulder_arm": {"ar": "الكتف والذراع الأيمن", "en": "Right Shoulder & Arm"},
+    "left_arm_hand": {"ar": "الذراع واليد اليسرى", "en": "Left Arm & Hand"},
+    "left_shoulder_arm": {"ar": "الكتف والذراع الأيسر", "en": "Left Shoulder & Arm"},
+    "head": {"ar": "الرأس", "en": "Head"},
+    "pillow": {"ar": "وسادة الرأس", "en": "Head Pillow"},
+    "shoulders": {"ar": "الكتفان", "en": "Shoulders"},
+    "right_shoulder": {"ar": "الكتف الأيمن", "en": "Right Shoulder"},
+    "left_shoulder": {"ar": "الكتف الأيسر", "en": "Left Shoulder"},
+    "back": {"ar": "الظهر", "en": "Back"},
+    "pelvis": {"ar": "الحوض", "en": "Pelvis"},
+    "pelvis_side": {"ar": "جانب الحوض", "en": "Lateral Hip"},
+    "thighs": {"ar": "الفخذان", "en": "Thighs"},
+    "thigh_side": {"ar": "جانب الفخذ", "en": "Outer Thigh"},
+    "calves": {"ar": "الساقان", "en": "Lower Legs"},
+    "calf_side": {"ar": "جانب الساق", "en": "Outer Leg"},
+    "heels_feet": {"ar": "الكعبان والقدمان", "en": "Heels & Feet"},
+    "foot_end": {"ar": "أسفل المفرش", "en": "Foot Margin"},
+}
+
+
+def normalize_scenario_key(scenario: str) -> ScenarioKey:
+    """يحوّل أي مفتاح سيناريو (داخلي أو عربي قديم) إلى المفتاح الداخلي القياسي."""
+    if scenario in SCENARIO_CATALOG:
+        return scenario  # type: ignore[return-value]
+    return _LEGACY_SCENARIO_MAP.get(scenario, "normal")
+
+
+def get_scenario_label(scenario: str, lang: LangType = "ar") -> str:
+    key = normalize_scenario_key(scenario)
+    return SCENARIO_CATALOG[key]["label"][lang]
+
+
+def get_scenario_description(scenario: str, lang: LangType = "ar") -> str:
+    key = normalize_scenario_key(scenario)
+    return SCENARIO_CATALOG[key]["description"][lang]
 
 
 @dataclass
 class SensorReading:
     """قراءة واحدة من حساسات المفرش الطبي الذكي."""
     pressure_matrix: np.ndarray          # shape (16, 8)
-    temperature: float                   # °م
+    temperature: float                   # °C
     humidity: float                      # %
-    scenario: ScenarioType
+    scenario: ScenarioKey
 
 
-def get_cell_region(row: int, col: int) -> str:
-    """
-    يُحدّد اسم المنطقة التشريحية للخلية (row, col) بنظام فهرسة يبدأ من 0:
-      - الرأس: صف 0–1 (صف 1–2)
-      - الكتفان: صف 2–3 (صف 3–4)
-      - الذراعان واليدان: الأعمدة الطرفية (0–1 يمين، 6–7 يسار) في الصفوف 3–8 (صف 4–9)
-      - الظهر: صف 4–5 (صف 5–6)
-      - الحوض: صف 6–9 (صف 7–10)
-      - الفخذان: صف 10–12 (صف 11–13)
-      - الساقان والكعبان/القدمان: صف 13–15 (صف 14–16)
-    """
-    # الذراعان واليدان في الأعمدة الطرفية للصفوف 4–9 (indices 3..8)
+def get_cell_region_key(row: int, col: int) -> str:
+    """يُحدّد المفتاح الداخلي للمنطقة التشريحية للخلية (row, col)."""
     if 3 <= row <= 8 and col in (0, 1):
-        return "الذراع واليد اليمنى" if row >= 4 else "الكتف والذراع الأيمن"
+        return "right_arm_hand" if row >= 4 else "right_shoulder_arm"
     if 3 <= row <= 8 and col in (6, 7):
-        return "الذراع واليد اليسرى" if row >= 4 else "الكتف والذراع الأيسر"
+        return "left_arm_hand" if row >= 4 else "left_shoulder_arm"
 
     if 0 <= row <= 1:
-        return "الرأس" if 2 <= col <= 5 else "وسادة الرأس"
+        return "head" if 2 <= col <= 5 else "pillow"
     if 2 <= row <= 3:
         if 1 <= col <= 6:
-            return "الكتفان"
-        return "الكتف الأيمن" if col == 0 else "الكتف الأيسر"
+            return "shoulders"
+        return "right_shoulder" if col == 0 else "left_shoulder"
     if 4 <= row <= 5:
-        return "الظهر"
+        return "back"
     if 6 <= row <= 9:
-        return "الحوض" if 2 <= col <= 5 else "جانب الحوض"
+        return "pelvis" if 2 <= col <= 5 else "pelvis_side"
     if 10 <= row <= 12:
-        return "الفخذان" if 2 <= col <= 5 else "جانب الفخذ"
+        return "thighs" if 2 <= col <= 5 else "thigh_side"
     if row == 13:
-        return "الساقان" if 2 <= col <= 5 else "جانب الساق"
-    return "الكعبان والقدمان" if 2 <= col <= 5 else "أسفل المفرش"
+        return "calves" if 2 <= col <= 5 else "calf_side"
+    return "heels_feet" if 2 <= col <= 5 else "foot_end"
+
+
+def get_cell_region(row: int, col: int, lang: LangType = "ar") -> str:
+    """يُرجع اسم المنطقة التشريحية للخلية باللغة المطلوبة."""
+    key = get_cell_region_key(row, col)
+    return CELL_REGION_LABELS[key][lang]
 
 
 def _base_pressure() -> np.ndarray:
@@ -123,7 +206,6 @@ def _base_pressure() -> np.ndarray:
     يولّد توزيع ضغط أساسي واقعي لمريض مستلقٍ على الظهر بشكل متوازن
     على مصفوفة 16×8 مع تمثيل كافة مناطق الجسم.
     """
-    # خلفية المفرش غير المحمّلة
     mat = np.random.normal(loc=8.5, scale=1.4, size=(ROWS, COLS))
 
     # 1. الرأس (صفوف 1–2 -> 0:2، أعمدة وسطى 2:6)
@@ -138,7 +220,6 @@ def _base_pressure() -> np.ndarray:
     # 4. الذراعان واليدان (صفوف 4–9 -> 3:9، أعمدة طرفية يمنى 0:2 ويسرى 6:8)
     mat[3:9, 0:2] = np.random.normal(loc=18.5, scale=2.0, size=(6, 2))
     mat[3:9, 6:8] = np.random.normal(loc=18.5, scale=2.0, size=(6, 2))
-    # نقطة التقاء الكتف مع أعلى الذراع (صف 4 -> index 3، عمود 1 و 6)
     mat[3, 1] = np.random.normal(loc=23.5, scale=2.0)
     mat[3, 6] = np.random.normal(loc=23.5, scale=2.0)
 
@@ -156,22 +237,22 @@ def _base_pressure() -> np.ndarray:
 
 
 def generate_reading(
-    scenario: ScenarioType = "طبيعي",
+    scenario: str = "normal",
     step: int = 0,
     climate_mode: Literal["off", "cool", "heat"] = "off",
     climate_steps: int = 0,
     target_temp: float = 34.0,
 ) -> SensorReading:
     """
-    تولّد قراءة واحدة حسب السيناريو المختار ورقم الخطوة الزمنية،
-    مع محاكاة الأثر التدريجي الواقعي لوحدة التهوية والتبريد أو التدفئة الآمنة عند تفعيلها.
+    تولّد قراءة واحدة حسب مفتاح السيناريو الداخلي ورقم الخطوة الزمنية،
+    مع محاكاة الأثر التدريجي الواقعي لوحدة التهوية والتبريد أو التدفئة الآمنة.
     """
+    scn = normalize_scenario_key(scenario)
     pressure = _base_pressure()
     temp = np.random.normal(loc=34.0, scale=0.35)
     humidity = np.random.normal(loc=55.0, scale=2.8)
 
-    if scenario == "ضغط_حوض":
-        # ارتفاع مستمر في منطقة الحوض (صفوف 7–10 -> 6:10، أعمدة 2:6)
+    if scn == "pelvis_pressure":
         intensity = min(35.0 + step * 2.0, 65.0)
         pressure[6:10, 2:6] = np.random.normal(
             loc=29.0 + intensity, scale=2.2, size=(4, 4)
@@ -179,8 +260,7 @@ def generate_reading(
         temp = np.random.normal(loc=34.3, scale=0.35)
         humidity = np.random.normal(loc=56.5, scale=2.6)
 
-    elif scenario == "ضغط_كعبين":
-        # ارتفاع الضغط على الساقين والكعبين/القدمين (صفوف 14–16 -> 13:16، أعمدة 2:6)
+    elif scn == "heels_pressure":
         calf_boost = min(26.0 + step * 1.5, 48.0)
         heel_boost = min(40.0 + step * 2.0, 69.0)
         pressure[13:14, 2:6] = np.random.normal(
@@ -192,49 +272,41 @@ def generate_reading(
         temp = np.random.normal(loc=34.1, scale=0.35)
         humidity = np.random.normal(loc=55.5, scale=2.6)
 
-    elif scenario == "ضغط_جانبي":
-        # استلقاء جانبي طويل (على الجانب الأيمن): تخفيف الجانب المقابل وتركز الحمل على الكتف والذراع واليد
+    elif scn == "lateral_pressure":
         pressure[:, 5:8] = np.random.normal(loc=8.5, scale=1.3, size=(ROWS, 3))
         pressure[4:13, 2:5] *= 0.82
         lateral_boost = min(38.0 + step * 2.0, 66.0)
-        # الكتف الأيمن (صفوف 3–4 -> 2:4، أعمدة 0:3)
         pressure[2:4, 0:3] = np.random.normal(
             loc=27.5 + lateral_boost, scale=2.3, size=(2, 3)
         )
-        # الذراع واليد اليمنى (صفوف 4–9 -> 3:9، أعمدة 0:2)
         pressure[3:9, 0:2] = np.random.normal(
             loc=24.0 + lateral_boost * 0.92, scale=2.2, size=(6, 2)
         )
         temp = np.random.normal(loc=34.4, scale=0.35)
         humidity = np.random.normal(loc=57.0, scale=2.6)
 
-    elif scenario == "تعرق_وحرارة":
-        # ضغط متوازن طبيعي مع ارتفاع ملحوظ في الحرارة والرطوبة السطحية
+    elif scn == "heat_sweat":
         base_temp = min(36.8 + step * 0.24, 38.8)
         base_hum = min(74.0 + step * 1.7, 90.0)
         temp = np.random.normal(loc=base_temp, scale=0.25)
         humidity = np.random.normal(loc=base_hum, scale=2.0)
 
-    elif scenario == "برودة":
-        # ضغط متوازن طبيعي مع انخفاض غير معتاد في حرارة سطح المفرش
+    elif scn == "cold_surface":
         base_temp = max(30.2 - step * 0.25, 28.0)
         temp = np.random.normal(loc=base_temp, scale=0.22)
         humidity = np.random.normal(loc=47.5, scale=2.2)
 
-    elif scenario == "خطر_مركب":
-        # سيناريو طارئ: ضغط مرتفع على الحوض + تعرق ورطوبة عالية + حرارة مرتفعة
+    elif scn == "compound_risk":
         intensity = min(40.0 + step * 2.2, 68.0)
         pressure[6:10, 2:6] = np.random.normal(
             loc=30.0 + intensity, scale=2.3, size=(4, 4)
         )
-        # انتقال جزئي للحمل نحو أسفل الظهر (صف 6 -> index 5)
         pressure[5:6, 2:6] = np.random.normal(loc=41.0, scale=2.0, size=(1, 4))
         base_temp = min(37.4 + step * 0.25, 39.2)
         base_hum = min(78.0 + step * 1.8, 93.0)
         temp = np.random.normal(loc=base_temp, scale=0.25)
         humidity = np.random.normal(loc=base_hum, scale=2.0)
 
-    # الأثر التدريجي لوحدة التهوية والتبريد أو التدفئة الآمنة على الحرارة والرطوبة السطحية
     safe_target = float(np.clip(target_temp, 32.5, 36.0))
     if climate_mode == "cool" and climate_steps > 0:
         alpha = min(climate_steps * 0.10, 0.80)
@@ -256,11 +328,11 @@ def generate_reading(
         pressure_matrix=np.round(pressure, 1),
         temperature=round(temp, 1),
         humidity=round(humidity, 1),
-        scenario=scenario,
+        scenario=scn,
     )
 
 
-def generate_batch(scenario: ScenarioType = "طبيعي",
+def generate_batch(scenario: str = "normal",
                    n: int = 100) -> list[SensorReading]:
     """تولّد دفعة من القراءات المتتالية."""
     return [generate_reading(scenario, step=i) for i in range(n)]

@@ -28,6 +28,72 @@ def _load_vendor_scripts() -> tuple[str, str]:
     return three_js, orbit_js
 
 
+VIEWER_3D_I18N: dict[str, dict[str, str]] = {
+    "ar": {
+        "dir": "rtl",
+        "align": "right",
+        "scale_deg": "90deg",
+        "unit_prefix": "وحدة التحكم: ",
+        "led_alert": "تنبيه نشط (أحمر)",
+        "led_cool_alert": "تهوية وتبريد آمن + تنبيه",
+        "led_cool": "تهوية وتبريد آمن (أزرق)",
+        "led_heat_alert": "تدفئة آمنة + تنبيه",
+        "led_heat": "تدفئة آمنة (برتقالي دافئ)",
+        "led_normal": "وضع مستقر (أخضر)",
+        "btn_explode_open": "عرض الطبقات الداخلية",
+        "btn_explode_close": "دمج الطبقات",
+        "slider_label": "تفكيك الطبقات",
+        "btn_hide_patient": "إخفاء مجسم المريض",
+        "btn_show_patient": "إظهار مجسم المريض",
+        "btn_reset_cam": "إعادة ضبط الزاوية",
+        "hint": "اسحب بالماوس للتدوير · عجلة الماوس للتقريب · حرّك شريط الطبقات لفحص البنية الهندسية",
+        "low_pressure": "ضغط منخفض",
+        "high_pressure": "ضغط مرتفع",
+        "l1_title": "١) الغطاء القطني الطبي المبطّن",
+        "l1_sub": "مربعات ناعمة لطيفة على الجلد وقابلة للغسل",
+        "l2_title": "٢) شريحة الحساسات المرنة (١٦×٨)",
+        "l2_sub": "١٢٨ نقطة قياس لحظية للضغط والتموّج الحراري",
+        "l3_title": "٣) شبكة التهوية (3D Spacer Mesh)",
+        "l3_sub": "قنوات التبريد والتدفئة الآمنة وتصريف الرطوبة",
+        "l4_title": "٤) الإسفنج الطبي المثقّب",
+        "l4_sub": "توزيع متوازن للضغط ومسارات تهوية",
+        "l5_title": "٥) القاعدة المانعة للانزلاق",
+        "l5_sub": "ثبات على المرتبة + ٤ أحزمة تثبيت مطاطية",
+    },
+    "en": {
+        "dir": "ltr",
+        "align": "left",
+        "scale_deg": "270deg",
+        "unit_prefix": "Control Unit: ",
+        "led_alert": "Active Alert (Red)",
+        "led_cool_alert": "Safe Cooling + Alert",
+        "led_cool": "Safe Cooling & Vent (Blue)",
+        "led_heat_alert": "Safe Warming + Alert",
+        "led_heat": "Safe Warming (Warm Orange)",
+        "led_normal": "Stable Mode (Green)",
+        "btn_explode_open": "Explode Internal Layers",
+        "btn_explode_close": "Merge Layers",
+        "slider_label": "Layer Separation",
+        "btn_hide_patient": "Hide Patient Model",
+        "btn_show_patient": "Show Patient Model",
+        "btn_reset_cam": "Reset View",
+        "hint": "Drag to rotate · Scroll to zoom · Adjust slider to inspect the 5 internal layers",
+        "low_pressure": "Low Pressure",
+        "high_pressure": "High Pressure",
+        "l1_title": "1) Quilted Medical Cotton Cover",
+        "l1_sub": "Soft skin-friendly squares · Removable & washable",
+        "l2_title": "2) Flexible Sensor Array (16×8)",
+        "l2_sub": "128 real-time pressure nodes & 3D relief",
+        "l3_title": "3) 3D Spacer Ventilation Mesh",
+        "l3_sub": "Safe cooling/warming channels & moisture airflow",
+        "l4_title": "4) Perforated Medical Foam",
+        "l4_sub": "Balanced pressure redistribution & air pores",
+        "l5_title": "5) Anti-Slip Base Layer",
+        "l5_sub": "Stable bed grip + 4 elastic corner straps",
+    },
+}
+
+
 def build_mattress_3d_html(
     pressure_matrix: np.ndarray | None,
     climate_visual: str = "standby",   # "standby" | "cool" | "heat" | "off"
@@ -35,38 +101,38 @@ def build_mattress_3d_html(
     affected_region: str = "توزيع متوازن",
     temperature: float = 34.0,
     humidity: float = 55.0,
+    lang: str = "ar",
 ) -> str:
     """
-    يولّد كود HTML متكاملاً لمشهد Three.js التفاعلي لعرضه عبر st.components.v1.html.
+    يولّد كود HTML متكاملاً لمشهد Three.js التفاعلي باللغة المطلوبة (ar / en).
     """
     three_js, orbit_js = _load_vendor_scripts()
+    tr = VIEWER_3D_I18N.get(lang, VIEWER_3D_I18N["ar"])
 
     if pressure_matrix is None:
         mat_list = [[10.0] * 8 for _ in range(16)]
     else:
         mat_list = np.round(pressure_matrix, 1).tolist()
 
-    # تحديد لون وحالة مؤشر LED لوحدة التحكم الجانبية:
-    # أخضر للطبيعي، أزرق للتهوية والتبريد، برتقالي دافئ للتدفئة، أحمر عند التنبيه
     if alert_triggered and climate_visual not in ("cool", "heat"):
         led_state = "alert"
-        led_label = "تنبيه نشط (أحمر)"
+        led_label = tr["led_alert"]
         led_hex = "#EF4444"
     elif climate_visual == "cool":
         led_state = "cool_alert" if alert_triggered else "cool"
-        led_label = "تهوية وتبريد آمن + تنبيه" if alert_triggered else "تهوية وتبريد آمن (أزرق)"
+        led_label = tr["led_cool_alert"] if alert_triggered else tr["led_cool"]
         led_hex = "#0EA5E9"
     elif climate_visual == "heat":
         led_state = "heat_alert" if alert_triggered else "heat"
-        led_label = "تدفئة آمنة + تنبيه" if alert_triggered else "تدفئة آمنة (برتقالي دافئ)"
+        led_label = tr["led_heat_alert"] if alert_triggered else tr["led_heat"]
         led_hex = "#F97316"
     elif alert_triggered:
         led_state = "alert"
-        led_label = "تنبيه نشط (أحمر)"
+        led_label = tr["led_alert"]
         led_hex = "#EF4444"
     else:
         led_state = "normal"
-        led_label = "وضع مستقر (أخضر)"
+        led_label = tr["led_normal"]
         led_hex = "#10B981"
 
     payload = json.dumps(
@@ -80,23 +146,24 @@ def build_mattress_3d_html(
             "region": affected_region,
             "temp": round(float(temperature), 1),
             "hum": round(float(humidity), 1),
+            "i18n": tr,
         },
         ensure_ascii=False,
     )
 
     return f"""<!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="{lang}" dir="{tr['dir']}">
 <head>
 <meta charset="utf-8" />
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@500;600;700&family=Inter:wght@500;600;700&display=swap');
   * {{ box-sizing: border-box; margin: 0; padding: 0; user-select: none; }}
   html, body {{
     width: 100%; height: 100%; overflow: hidden;
     background: #F8FAFC;
-    font-family: 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: 'Cairo', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     color: #0F172A;
-    direction: rtl;
+    direction: {tr['dir']};
   }}
   #stage {{
     position: relative;
@@ -178,7 +245,7 @@ def build_mattress_3d_html(
   }}
   .scale-grad {{
     width: 84px; height: 8px; border-radius: 999px;
-    background: linear-gradient(90deg, #991B1B 0%, #DC2626 18%, #F97316 38%, #FACC15 58%, #7DD3FC 82%, #E0F2FE 100%);
+    background: linear-gradient({tr['scale_deg']}, #991B1B 0%, #DC2626 18%, #F97316 38%, #FACC15 58%, #7DD3FC 82%, #E0F2FE 100%);
   }}
 
   /* تسميات الطبقات الخمس عند التفكيك */
@@ -188,11 +255,11 @@ def build_mattress_3d_html(
   .layer-tag {{
     position: absolute; transform: translate(-100%, -50%);
     background: rgba(255, 255, 255, 0.96);
-    border: 1px solid #CBD5E1; border-right: 3px solid #0284C7;
+    border: 1px solid #CBD5E1; border-inline-start: 3px solid #0284C7;
     border-radius: 8px; padding: 4px 10px;
     box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
     white-space: nowrap; opacity: 0; transition: opacity 0.2s ease;
-    direction: rtl; text-align: right;
+    direction: {tr['dir']}; text-align: {tr['align']};
   }}
   .layer-tag .lt-title {{ font-size: 11.5px; font-weight: 700; color: #0F172A; display: block; line-height: 1.3; }}
   .layer-tag .lt-sub {{ font-size: 10.5px; font-weight: 500; color: #64748B; display: block; line-height: 1.2; }}
@@ -202,13 +269,13 @@ def build_mattress_3d_html(
 <div id="stage">
   <div class="hud-top">
     <div class="hud-group">
-      <button id="btnExplode" class="hud-btn" type="button">عرض الطبقات الداخلية</button>
+      <button id="btnExplode" class="hud-btn" type="button">{tr['btn_explode_open']}</button>
       <div class="slider-pill">
-        <span>تفكيك الطبقات</span>
+        <span>{tr['slider_label']}</span>
         <input id="rngExplode" type="range" min="0" max="100" value="0" />
       </div>
-      <button id="btnPatient" class="hud-btn active" type="button">إخفاء مجسم المريض</button>
-      <button id="btnResetCam" class="hud-btn" type="button">إعادة ضبط الزاوية</button>
+      <button id="btnPatient" class="hud-btn active" type="button">{tr['btn_hide_patient']}</button>
+      <button id="btnResetCam" class="hud-btn" type="button">{tr['btn_reset_cam']}</button>
     </div>
     <div class="unit-status" id="unitBadge">
       <span class="led-dot" id="ledDot"></span>
@@ -219,11 +286,11 @@ def build_mattress_3d_html(
   <div id="labels-layer"></div>
 
   <div class="hud-bottom">
-    <div class="hint-pill">اسحب بالماوس للتدوير · عجلة الماوس للتقريب · حرّك شريط الطبقات لفحص البنية الهندسية</div>
+    <div class="hint-pill">{tr['hint']}</div>
     <div class="scale-bar">
-      <span>ضغط منخفض</span>
+      <span>{tr['low_pressure']}</span>
       <span class="scale-grad"></span>
-      <span>ضغط مرتفع</span>
+      <span>{tr['high_pressure']}</span>
     </div>
   </div>
 </div>
@@ -233,6 +300,7 @@ def build_mattress_3d_html(
 <script>
 (function() {{
   const DATA = {payload};
+  const TR = DATA.i18n;
   const stage = document.getElementById('stage');
   const labelsLayer = document.getElementById('labels-layer');
   const ledDot = document.getElementById('ledDot');
@@ -240,7 +308,7 @@ def build_mattress_3d_html(
 
   ledDot.style.color = DATA.ledHex;
   ledDot.style.background = DATA.ledHex;
-  ledText.textContent = 'وحدة التحكم: ' + DATA.ledLabel;
+  ledText.textContent = TR.unit_prefix + DATA.ledLabel;
 
   // ─────────── إعداد المشهد والكاميرا والإضاءة ───────────
   const scene = new THREE.Scene();
@@ -933,42 +1001,42 @@ def build_mattress_3d_html(
 
   scene.add(patientGroup);
 
-  // ─────────── 5. تفكيك الطبقات التفاعلي والتسميات العربية ───────────
+  // ─────────── 5. تفكيك الطبقات التفاعلي والتسميات المترجمة ───────────
   const layerMeta = [
     {{
       group: layer5Group,
       baseY: BED_TOP_Y + 0.004,
       explodeDelta: 0.00,
-      title: '٥) القاعدة المانعة للانزلاق',
-      sub: 'ثبات على المرتبة + ٤ أحزمة تثبيت مطاطية',
+      title: TR.l5_title,
+      sub: TR.l5_sub,
     }},
     {{
       group: layer4Group,
       baseY: BED_TOP_Y + 0.0145,
       explodeDelta: 0.145,
-      title: '٤) الإسفنج الطبي المثقّب',
-      sub: 'توزيع متوازن للضغط ومسارات تهوية',
+      title: TR.l4_title,
+      sub: TR.l4_sub,
     }},
     {{
       group: layer3Group,
       baseY: BED_TOP_Y + 0.026,
       explodeDelta: 0.295,
-      title: '٣) شبكة التهوية (3D Spacer Mesh)',
-      sub: 'قنوات التبريد والتدفئة الآمنة وتصريف الرطوبة',
+      title: TR.l3_title,
+      sub: TR.l3_sub,
     }},
     {{
       group: layer2Group,
       baseY: BED_TOP_Y + 0.033,
       explodeDelta: 0.445,
-      title: '٢) شريحة الحساسات المرنة (١٦×٨)',
-      sub: '١٢٨ نقطة قياس لحظية للضغط والتموّج الحراري',
+      title: TR.l2_title,
+      sub: TR.l2_sub,
     }},
     {{
       group: layer1Group,
       baseY: BED_TOP_Y + 0.040,
       explodeDelta: 0.595,
-      title: '١) الغطاء القطني الطبي المبطّن',
-      sub: 'مربعات ناعمة لطيفة على الجلد وقابلة للغسل',
+      title: TR.l1_title,
+      sub: TR.l1_sub,
     }},
   ];
 
@@ -993,10 +1061,10 @@ def build_mattress_3d_html(
     rngExplode.value = Math.round(val * 100);
     if (val > 0.5) {{
       btnExplode.classList.add('active');
-      btnExplode.textContent = 'دمج الطبقات';
+      btnExplode.textContent = TR.btn_explode_close;
     }} else {{
       btnExplode.classList.remove('active');
-      btnExplode.textContent = 'عرض الطبقات الداخلية';
+      btnExplode.textContent = TR.btn_explode_open;
     }}
   }}
 
@@ -1014,7 +1082,7 @@ def build_mattress_3d_html(
     patientVisible = !patientVisible;
     patientGroup.visible = patientVisible;
     btnPatient.classList.toggle('active', patientVisible);
-    btnPatient.textContent = patientVisible ? 'إخفاء مجسم المريض' : 'إظهار مجسم المريض';
+    btnPatient.textContent = patientVisible ? TR.btn_hide_patient : TR.btn_show_patient;
   }});
 
   btnResetCam.addEventListener('click', () => {{
