@@ -466,7 +466,38 @@ _html(
 }}
 
 html, body, .stApp {{ background: var(--bg); }}
-.stApp {{ direction: {tr['dir']}; text-align: {tr['align']}; color: var(--text); }}
+.stApp,
+.stApp [data-testid="stAppViewContainer"],
+.stApp [data-testid="stMain"],
+.stApp [data-testid="stMainBlockContainer"],
+.stApp [data-testid="stVerticalBlock"],
+.stApp [data-testid="stHorizontalBlock"],
+.stApp [data-testid="stColumn"],
+.stApp [data-testid="stElementContainer"],
+.stApp [data-testid="stLayoutWrapper"],
+.stApp .stMarkdown,
+.stApp [data-testid="stMarkdown"],
+.stApp [data-testid="stMarkdownContainer"],
+.stApp [data-testid="stCaptionContainer"],
+.stApp [data-testid="stText"],
+.stApp [data-testid="stWidgetLabel"],
+.stApp [data-testid="stSelectbox"] [data-baseweb="select"],
+.stApp [data-baseweb="tab-list"] {{
+  direction: {tr['dir']} !important;
+  text-align: {tr['align']} !important;
+}}
+.stApp {{ color: var(--text); }}
+
+.stApp [data-testid="stMarkdownContainer"] div,
+.stApp [data-testid="stMarkdownContainer"] p,
+.stApp [data-testid="stMarkdownContainer"] li,
+.stApp [data-testid="stMarkdownContainer"] h1,
+.stApp [data-testid="stMarkdownContainer"] h2,
+.stApp [data-testid="stMarkdownContainer"] h3,
+.stApp [data-testid="stMarkdownContainer"] h4,
+.stApp [data-testid="stWidgetLabel"] p {{
+  text-align: {tr['align']} !important;
+}}
 
 .stApp, .stApp p, .stApp label, .stApp button, .stApp input, .stApp li,
 .stApp h1, .stApp h2, .stApp h3, .stApp h4,
@@ -478,7 +509,14 @@ html, body, .stApp {{ background: var(--bg); }}
   font-family: 'Cairo', 'Inter', 'Tajawal', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
 }}
 
-[data-baseweb="popover"] ul {{ direction: {tr['dir']}; text-align: {tr['align']}; }}
+[data-baseweb="popover"],
+[data-baseweb="popover"] ul,
+[data-baseweb="popover"] li,
+[data-baseweb="menu"],
+[data-baseweb="menu"] li {{
+  direction: {tr['dir']} !important;
+  text-align: {tr['align']} !important;
+}}
 
 header[data-testid="stHeader"] {{ background: transparent; }}
 .block-container, [data-testid="stMainBlockContainer"] {{
@@ -536,6 +574,14 @@ header[data-testid="stHeader"] {{ background: transparent; }}
 /* الأزرار */
 .stButton > button {{ border-radius: 12px; min-height: 42px; font-weight: 600; transition: all .15s ease; padding: 4px 10px; }}
 .stButton > button p {{ font-weight: 600; font-size: 13.5px; }}
+.stApp .stButton button,
+.stApp .stButton button [data-testid="stMarkdownContainer"],
+.stApp .stButton button p,
+.stApp [data-baseweb="tab"],
+.stApp [data-baseweb="tab"] [data-testid="stMarkdownContainer"],
+.stApp [data-baseweb="tab"] p {{
+  text-align: center !important;
+}}
 [data-testid="stBaseButton-primary"] {{
   background: var(--primary) !important; border: 1px solid var(--primary) !important; color: #FFFFFF !important;
   box-shadow: 0 4px 12px rgba(2, 132, 199, 0.22);
@@ -549,7 +595,9 @@ header[data-testid="stHeader"] {{ background: transparent; }}
 }}
 
 /* شريط التمرير */
-[data-testid="stSlider"] [data-baseweb="slider"] {{ direction: ltr; }}
+.stApp [data-testid="stSlider"] [data-baseweb="slider"],
+.stApp [data-testid="stSlider"] [data-baseweb="slider"] div {{ direction: ltr !important; }}
+.stApp [data-testid="stSlider"] [data-testid="stSliderThumbValue"] {{ direction: ltr !important; text-align: center !important; }}
 [data-testid="stSlider"] label p {{ color: var(--muted); font-size: 13px; font-weight: 600; }}
 
 /* التبويبات */
@@ -569,7 +617,14 @@ header[data-testid="stHeader"] {{ background: transparent; }}
 
 /* الترويسة */
 .app-header {{ display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }}
-.brand {{ display: flex; align-items: center; gap: 14px; }}
+.brand {{ display: flex; align-items: center; gap: 14px; min-width: 0; }}
+.brand-text, .patient-text, .metric-body {{
+  display: flex; flex-direction: column; align-items: flex-start; min-width: 0;
+  text-align: {tr['align']} !important;
+}}
+.app-title, .app-subtitle, .patient-title, .patient-sub, .metric-value, .metric-sub {{
+  width: 100%; text-align: {tr['align']} !important;
+}}
 .brand-icon {{
   width: 48px; height: 48px; border-radius: 14px; background: linear-gradient(135deg, #0EA5E9, #0284C7);
   display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 16px rgba(2, 132, 199, 0.28);
@@ -593,7 +648,7 @@ header[data-testid="stHeader"] {{ background: transparent; }}
 .patient-bar {{
   display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
 }}
-.patient-id {{ display: flex; align-items: center; gap: 12px; }}
+.patient-id {{ display: flex; align-items: center; gap: 12px; min-width: 0; }}
 .patient-avatar {{
   width: 40px; height: 40px; border-radius: 12px; background: #E0F2FE; color: #0284C7;
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
@@ -666,8 +721,9 @@ header[data-testid="stHeader"] {{ background: transparent; }}
   font-size: 11.5px; color: var(--muted); line-height: 1.7;
 }}
 
-.ltr-num {{ direction: ltr; unicode-bidi: isolate; display: inline-block; }}
-.empty-state {{ text-align: center; color: var(--muted); padding: 48px 12px; font-size: 14px; }}
+.stApp .ltr-num {{ direction: ltr !important; unicode-bidi: isolate; display: inline-block; }}
+.stApp [data-testid="stMarkdownContainer"] div.empty-state,
+.stApp .empty-state {{ text-align: center !important; color: var(--muted); padding: 48px 12px; font-size: 14px; }}
 
 /* سجل التنبيهات */
 .alert-list {{ display: flex; flex-direction: column; gap: 12px; max-height: 440px; overflow-y: auto; padding-inline-end: 4px; margin-top: 10px; }}
@@ -724,7 +780,7 @@ with hdr_col_main:
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2"
            stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-5 4 10 2-5h6"/></svg>
     </div>
-    <div>
+    <div class="brand-text">
       <div class="app-title">{escape(tr['app_title'])}</div>
       <div class="app-subtitle">{escape(tr['app_subtitle'])}</div>
     </div>
@@ -776,7 +832,7 @@ with st.container(key="card_patient"):
         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
       </svg>
     </div>
-    <div>
+    <div class="patient-text">
       <div class="patient-title">{escape(tr['patient_title'])}</div>
       <div class="patient-sub">{escape(tr['patient_sub'])}</div>
     </div>
@@ -947,11 +1003,12 @@ def _delta_html(history: list[float], unit: str) -> str:
 
 
 def _metric_card(label: str, accent: str, value: str, unit: str, sub: str) -> str:
+    unit_html = f'<span class="metric-unit">{escape(unit)}</span>' if unit else ""
     return (
         '<div class="metric-card">'
         f'<div class="metric-top"><span class="metric-label">'
         f'<span class="metric-accent" style="background:{accent}"></span>{escape(label)}</span></div>'
-        f'<div><div class="metric-value"><bdi>{value}</bdi><span class="metric-unit">{escape(unit)}</span></div>'
+        f'<div class="metric-body"><div class="metric-value"><bdi>{value}</bdi>{unit_html}</div>'
         f'<div class="metric-sub">{sub}</div></div>'
         "</div>"
     )
@@ -1028,7 +1085,7 @@ status_font = "21px" if len(status_value) > 16 else "25px"
 status_card = (
     f'<div class="metric-card {status_cls}">'
     f'<div class="metric-top"><span class="metric-label">{escape(tr["card_status"])}</span>{pill}</div>'
-    f'<div><div class="metric-value" style="font-size:{status_font}">{escape(status_value)}</div>'
+    f'<div class="metric-body"><div class="metric-value" style="font-size:{status_font}">{escape(status_value)}</div>'
     f'<div class="metric-sub">{status_sub}</div></div>'
     "</div>"
 )

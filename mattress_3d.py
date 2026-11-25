@@ -164,6 +164,7 @@ def build_mattress_3d_html(
     font-family: 'Cairo', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     color: #0F172A;
     direction: {tr['dir']};
+    text-align: {tr['align']};
   }}
   #stage {{
     position: relative;
