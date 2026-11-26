@@ -21,7 +21,14 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from mattress_3d import build_mattress_3d_html
-from model import DEFAULT_SUSTAINED_HOURS, SmartMattressModel, localize_alert, localize_analysis
+from model import (
+    DEFAULT_SUSTAINED_MINUTES,
+    DEFAULT_SUSTAINED_PERIODS,
+    SmartMattressModel,
+    format_sustained_duration,
+    localize_alert,
+    localize_analysis,
+)
 from simulator import (
     COLS,
     ROWS,
@@ -73,8 +80,8 @@ UI_I18N: dict[LangType, dict] = {
         "app_title": "المفرش الطبي الذكي",
         "app_subtitle": "مراقبة تشريحية وتكييف سطحي آمن · نظام محاكاة داعم للقرار",
         "badge_scenario": "السيناريو",
-        "badge_threshold": "عتبة التنبيه: استمرار {n} ساعات متواصلة (تجاهل الحركة العابرة)",
-        "badge_sim": "محاكاة زمنية مُسرّعة (١ قراءة = ١ ساعة)",
+        "badge_threshold": "عتبة التنبيه: استمرار ساعة متواصلة (60 دقيقة)",
+        "badge_sim": "محاكاة زمنية مُسرّعة (١ قراءة = ١٥ دقيقة)",
         "patient_title": "ملف المريض الافتراضي · الفئة: رعاية طويلة الأمد / مريض طريح فراش",
         "patient_sub": "خط الأساس الشخصي المتعلّم بالذكاء الاصطناعي (نموذج Isolation Forest متدرّب على النمط الطبيعي للمريض)",
         "chip_temp": "نطاق الحرارة الطبيعي",
@@ -84,11 +91,11 @@ UI_I18N: dict[LangType, dict] = {
         "patient_disclaimer": "إخلاء مسؤولية طبية: جميع البيانات المعروضة محاكاة توليدية لمريض افتراضي، والنظام أداة داعمة للقرار التمريضي ولا يُستخدم للتشخيص الطبي.",
         "sample_size": "حجم عيّنة التعلّم الأساسي: <b>{n} قراءة طبيعية</b>",
         "select_scenario": "اختر سيناريو المحاكاة",
-        "batch_slider": "ساعات المراقبة في الدفعة (١ قراءة = ١ ساعة)",
+        "batch_slider": "عدد الفترات في الدفعة (١ قراءة = ١٥ دقيقة · ٤ = ساعة)",
         "btn_generate": "ولّد قراءات جديدة",
         "btn_reset": "إعادة تعيين الجلسة",
         "scn_desc_prefix": "وصف السيناريو:",
-        "readings_count": "زمن المحاكاة المُسرّعة: <b>{h} ساعة</b> ({r} قراءة)",
+        "readings_count": "زمن المحاكاة المُسرّعة: <b>{m} دقيقة</b> ({r} قراءة)",
         "hvac_title": "وحدة التهوية والتبريد والتدفئة الآمنة",
         "hvac_pill_cool": "تهوية وتبريد نشط",
         "hvac_pill_heat": "تدفئة آمنة نشطة",
@@ -128,16 +135,16 @@ UI_I18N: dict[LangType, dict] = {
         "pill_critical": "خطر حرج",
         "val_compound": "خطر مركّب",
         "pill_active_alert": "تنبيه نشط",
-        "sub_consecutive": "<b>مدة الاستمرار: {n} ساعة</b> · يجب تغيير وضعية المريض الآن",
+        "sub_consecutive": "<b>مدة الاستمرار: {dur}</b> · يجب تغيير وضعية المريض الآن",
         "pill_transient": "حركة عابرة (لا إنذار)",
         "val_transient": "حركة عابرة",
-        "sub_transient": "<b>مدة الاستمرار: {h} ساعة</b> · تقلّب عابر ({sec} ث) تم تجاهله",
+        "sub_transient": "<b>مدة الاستمرار: {m} دقيقة</b> · تقلّب عابر ({sec} ث) تم تجاهله",
         "pill_monitoring": "قيد المراقبة",
         "val_anomaly": "قراءة شاذة",
-        "sub_before_alert": "<b>مدة الاستمرار: {c} ساعة</b> (الإنذار عند {t} ساعات) · {score}",
+        "sub_before_alert": "<b>مدة الاستمرار: {m} من {tm} دقيقة</b> (فترة {p}/{tp}) · {score}",
         "pill_stable": "مستقر",
         "val_normal": "طبيعي",
-        "sub_normal": "<b>مدة الاستمرار: {z} ساعة</b> · ضمن النمط الطبيعي · {score}",
+        "sub_normal": "<b>مدة الاستمرار: {z} دقيقة</b> · ضمن النمط الطبيعي · {score}",
         "placeholder_start": "اضغط «ولّد قراءات جديدة» للبدء",
         "pill_waiting": "بانتظار البيانات",
         "tab_3d": "عرض 3D تفاعلي للطبقات",
@@ -160,13 +167,13 @@ UI_I18N: dict[LangType, dict] = {
         "trend_temp_sub": "درجة مئوية · المنطقة المظللة = النمط الطبيعي",
         "trend_hum_title": "منحنى الرطوبة",
         "trend_hum_sub": "رطوبة نسبية % · المنطقة المظللة = النمط الطبيعي",
-        "axis_reading": "رقم القراءة (محاكاة زمنية مُسرّعة: ١ قراءة = ١ ساعة)",
-        "hover_reading": "القراءة / الساعة",
+        "axis_reading": "رقم القراءة (محاكاة زمنية مُسرّعة: ١ قراءة = ١٥ دقيقة)",
+        "hover_reading": "القراءة (١٥ دقيقة)",
         "alerts_title": "سجل التنبيهات وتوصيات التمريض",
         "alerts_count": "{n} تنبيه",
         "alerts_none": "لا تنبيهات",
         "lbl_region": "المنطقة:",
-        "lbl_consec": "مدة الاستمرار: {n} ساعة",
+        "lbl_consec": "مدة الاستمرار: {dur}",
         "lbl_time": "الوقت",
         "lbl_nurse_rec": "الإجراء الموصى به للممرض:",
         "lbl_peak_p": "أقصى ضغط",
@@ -175,7 +182,7 @@ UI_I18N: dict[LangType, dict] = {
         "lbl_anom_score": "درجة الشذوذ",
         "alerts_empty": (
             "لا توجد تنبيهات حتى الآن. يتجاهل النظام الحركات العابرة اللحظية، "
-            "ولا يُطلق التنبيه التمريضي إلا عند استمرار الضغط أو الشذوذ على نفس المنطقة لمدة 4 ساعات متواصلة."
+            "ولا يُطلق التنبيه التمريضي إلا عند استمرار الضغط أو الشذوذ على نفس المنطقة لمدة ساعة متواصلة (60 دقيقة)."
         ),
         "footer_disclaimer": (
             "<b>تنبيه مهم:</b> يعمل هذا النظام ببيانات محاكاة توليدية، "
@@ -196,8 +203,8 @@ UI_I18N: dict[LangType, dict] = {
         "app_title": "Smart Medical Mattress",
         "app_subtitle": "Full-Body Pressure Monitoring & Safe Microclimate · Decision-Support System",
         "badge_scenario": "Scenario",
-        "badge_threshold": "Alert Threshold: {n} Continuous Hours (Transient Motion Ignored)",
-        "badge_sim": "Accelerated Time Sim (1 Reading = 1 Hr)",
+        "badge_threshold": "Alert Threshold: 1 Continuous Hour (60 min)",
+        "badge_sim": "Accelerated Time Sim (1 Reading = 15 min)",
         "patient_title": "Virtual Patient Profile · Category: Long-Term Care / Bedridden Patient",
         "patient_sub": "AI-Learned Personal Baseline (Isolation Forest Model Trained Exclusively on Normal Posture Data)",
         "chip_temp": "Normal Temp Range",
@@ -207,11 +214,11 @@ UI_I18N: dict[LangType, dict] = {
         "patient_disclaimer": "Medical Disclaimer: All displayed metrics represent synthetic simulated data for a virtual patient. This system is a nursing decision-support tool and does not provide medical diagnosis.",
         "sample_size": "Baseline Training Sample: <b>{n} Normal Readings</b>",
         "select_scenario": "Select Simulation Scenario",
-        "batch_slider": "Monitoring Hours per Batch (1 Reading = 1 Hr)",
+        "batch_slider": "Intervals per Batch (1 Reading = 15 min · 4 = 1 Hr)",
         "btn_generate": "Generate New Readings",
         "btn_reset": "Reset Session",
         "scn_desc_prefix": "Scenario Description:",
-        "readings_count": "Accelerated Sim Time: <b>{h} hrs</b> ({r} readings)",
+        "readings_count": "Accelerated Sim Time: <b>{m} min</b> ({r} readings)",
         "hvac_title": "Safe Ventilation, Cooling & Warming Unit",
         "hvac_pill_cool": "Active Cooling & Vent",
         "hvac_pill_heat": "Active Safe Warming",
@@ -251,16 +258,16 @@ UI_I18N: dict[LangType, dict] = {
         "pill_critical": "Critical",
         "val_compound": "Compound Risk",
         "pill_active_alert": "Active Alert",
-        "sub_consecutive": "<b>Sustained Duration: {n} hrs</b> · Reposition patient now",
+        "sub_consecutive": "<b>Sustained: {dur}</b> · Reposition patient now",
         "pill_transient": "Transient (No Alert)",
         "val_transient": "Transient Motion",
-        "sub_transient": "<b>Sustained Duration: {h} hrs</b> · Brief shift ({sec}s) ignored",
+        "sub_transient": "<b>Sustained Duration: {m} min</b> · Brief shift ({sec}s) ignored",
         "pill_monitoring": "Monitoring",
         "val_anomaly": "Anomalous Reading",
-        "sub_before_alert": "<b>Sustained Duration: {c} hrs</b> (alert at {t} hrs) · {score}",
+        "sub_before_alert": "<b>Sustained: {m} of {tm} min</b> (interval {p}/{tp}) · {score}",
         "pill_stable": "Stable",
         "val_normal": "Normal",
-        "sub_normal": "<b>Sustained Duration: {z} hrs</b> · Within normal baseline · {score}",
+        "sub_normal": "<b>Sustained Duration: {z} min</b> · Within normal baseline · {score}",
         "placeholder_start": "Click “Generate New Readings” to start",
         "pill_waiting": "Awaiting Data",
         "tab_3d": "Interactive 3D Layers",
@@ -283,13 +290,13 @@ UI_I18N: dict[LangType, dict] = {
         "trend_temp_sub": "°C · Shaded band = Learned Normal Baseline",
         "trend_hum_title": "Humidity Trend",
         "trend_hum_sub": "Relative Humidity % · Shaded band = Learned Normal Baseline",
-        "axis_reading": "Reading # (Accelerated Time Sim: 1 Reading = 1 Hr)",
-        "hover_reading": "Reading / Hour",
+        "axis_reading": "Reading # (Accelerated Time Sim: 1 Reading = 15 min)",
+        "hover_reading": "Reading (15 min)",
         "alerts_title": "Alert Log & Nursing Recommendations",
         "alerts_count": "{n} Alerts",
         "alerts_none": "No Alerts",
         "lbl_region": "Region:",
-        "lbl_consec": "Sustained Duration: {n} hrs",
+        "lbl_consec": "Sustained: {dur}",
         "lbl_time": "Time",
         "lbl_nurse_rec": "Recommended Nursing Action:",
         "lbl_peak_p": "Peak Pressure",
@@ -298,7 +305,7 @@ UI_I18N: dict[LangType, dict] = {
         "lbl_anom_score": "Anomaly Score",
         "alerts_empty": (
             "No alerts recorded yet. Brief transient movements are ignored; "
-            "nursing alerts trigger only when elevated pressure or anomaly persists on the same zone for 4 continuous hours."
+            "nursing alerts trigger only when elevated pressure or anomaly persists on the same zone for 1 continuous hour (60 min)."
         ),
         "footer_disclaimer": (
             "<b>Important Notice:</b> This system operates on synthetic simulated data and serves strictly "
@@ -405,7 +412,7 @@ def _append_readings(count: int) -> None:
         st.session_state.step += 1
         st.session_state.total_readings += 1
         if not reading.is_transient:
-            st.session_state.simulated_hours += max(1, int(round(reading.duration_hours)))
+            st.session_state.simulated_minutes += max(1, int(reading.duration_minutes))
         st.session_state.history_index.append(st.session_state.total_readings)
         st.session_state.history_temp.append(reading.temperature)
         st.session_state.history_hum.append(reading.humidity)
@@ -424,11 +431,11 @@ def _init_session_state() -> None:
         st.session_state.lang = "ar"
 
     if "model" not in st.session_state:
-        m = SmartMattressModel(sustained_hours_threshold=DEFAULT_SUSTAINED_HOURS)
+        m = SmartMattressModel(sustained_minutes_threshold=DEFAULT_SUSTAINED_MINUTES)
         m.train()
         st.session_state.model = m
     else:
-        st.session_state.model.sustained_hours_threshold = DEFAULT_SUSTAINED_HOURS
+        st.session_state.model.sustained_minutes_threshold = DEFAULT_SUSTAINED_MINUTES
 
     if "history_temp" not in st.session_state:
         st.session_state.history_temp = []
@@ -438,9 +445,9 @@ def _init_session_state() -> None:
         st.session_state.history_scenario = []
         st.session_state.step = 0
         st.session_state.total_readings = 0
-        st.session_state.simulated_hours = 0
+        st.session_state.simulated_minutes = 0
         st.session_state.scenario = "normal"
-        st.session_state.batch_size = DEFAULT_SUSTAINED_HOURS
+        st.session_state.batch_size = DEFAULT_SUSTAINED_PERIODS
         st.session_state.hvac_mode = "auto"
         st.session_state.auto_latched_mode = "standby"
         st.session_state.target_temp = 34.0
@@ -452,8 +459,8 @@ def _init_session_state() -> None:
         _append_readings(3)
     else:
         st.session_state.scenario = normalize_scenario_key(st.session_state.scenario)
-        if "simulated_hours" not in st.session_state:
-            st.session_state.simulated_hours = st.session_state.total_readings
+        if "simulated_minutes" not in st.session_state:
+            st.session_state.simulated_minutes = st.session_state.total_readings * 15
 
 
 _init_session_state()
@@ -782,7 +789,7 @@ scenario_badge = (
     f'<span class="badge {tone_cls}"><span class="dot"></span>'
     f'{escape(tr["badge_scenario"])}: {escape(scn_label)}</span>'
 )
-threshold_badge_txt = tr["badge_threshold"].format(n=model.sustained_hours_threshold)
+threshold_badge_txt = tr["badge_threshold"]
 
 hdr_col_main, hdr_col_lang = st.columns([4.8, 1.15], gap="medium", vertical_alignment="center")
 
@@ -876,8 +883,8 @@ with col_ctrl_sim:
             n_steps = st.slider(
                 tr["batch_slider"],
                 min_value=1,
-                max_value=24,
-                value=min(int(st.session_state.batch_size), 24),
+                max_value=16,
+                value=min(int(st.session_state.batch_size), 16),
             )
             st.session_state.batch_size = n_steps
 
@@ -905,7 +912,7 @@ with col_ctrl_sim:
             st.rerun()
 
         sim_time_html = tr["readings_count"].format(
-            h=_num(st.session_state.simulated_hours),
+            m=_num(st.session_state.simulated_minutes),
             r=_num(st.session_state.total_readings),
         )
         _html(
@@ -979,7 +986,7 @@ if reset_btn:
     st.session_state.history_scenario.clear()
     st.session_state.step = 0
     st.session_state.total_readings = 0
-    st.session_state.simulated_hours = 0
+    st.session_state.simulated_minutes = 0
     st.session_state.climate_active_steps = 0
     st.session_state.auto_latched_mode = "standby"
     st.session_state.alerts_log.clear()
@@ -1069,7 +1076,8 @@ if latest_reading is not None and latest_result is not None and loc_analysis is 
     )
 
     score_html = escape(tr["model_score"]) + _num(f"{latest_result['score']:.4f}")
-    sustained_hrs = latest_result.get("sustained_hours", latest_result["consecutive"])
+    sustained_mins = int(latest_result.get("sustained_minutes", 0))
+    sustained_periods = int(latest_result.get("sustained_periods", latest_result["consecutive"]))
     if latest_result["alert_triggered"]:
         status_cls = "status-danger"
         if loc_analysis["is_compound"]:
@@ -1080,20 +1088,23 @@ if latest_reading is not None and latest_result is not None and loc_analysis is 
             status_value = (
                 loc_analysis["region"] if loc_analysis["affected_regions"] else loc_analysis["risk_type"]
             )
-        status_sub = tr["sub_consecutive"].format(n=_num(sustained_hrs), score=score_html)
+        dur_txt = escape(format_sustained_duration(sustained_mins, lang))
+        status_sub = tr["sub_consecutive"].format(dur=dur_txt)
     elif latest_result.get("transient_ignored"):
         status_cls = "status-ok"
         pill = f'<span class="pill pill-cool"><span class="dot"></span>{escape(tr["pill_transient"])}</span>'
         status_value = tr["val_transient"]
         t_secs = latest_result.get("transient_seconds", 30) or 30
-        status_sub = tr["sub_transient"].format(h=_num(sustained_hrs), sec=_num(t_secs))
+        status_sub = tr["sub_transient"].format(m=_num(sustained_mins), sec=_num(t_secs))
     elif latest_result["is_anomaly"]:
         status_cls = "status-warn"
         pill = f'<span class="pill pill-warn"><span class="dot"></span>{escape(tr["pill_monitoring"])}</span>'
         status_value = tr["val_anomaly"]
         status_sub = tr["sub_before_alert"].format(
-            c=_num(sustained_hrs),
-            t=_num(model.sustained_hours_threshold),
+            m=_num(sustained_mins),
+            tm=_num(model.sustained_minutes_threshold),
+            p=_num(sustained_periods),
+            tp=_num(model.sustained_periods_threshold),
             score=score_html,
         )
     else:
@@ -1354,8 +1365,10 @@ with st.container(key="card_alerts"):
             else:
                 sev_cls, pill_cls = "sev-warn", "pill-warn"
 
-            sustained_val = la.get("sustained_hours", la["consecutive"])
-            consec_txt = tr["lbl_consec"].format(n=_num(sustained_val))
+            dur_lbl = escape(
+                la.get("sustained_duration_label", format_sustained_duration(DEFAULT_SUSTAINED_MINUTES, lang))
+            )
+            consec_txt = tr["lbl_consec"].format(dur=dur_lbl)
             items.append(
                 f'<div class="alert-item {sev_cls}">'
                 f'<div class="alert-top">'
