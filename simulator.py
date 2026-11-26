@@ -5,8 +5,9 @@ simulator.py – مولّد بيانات المحاكاة للمفرش الطب�
   • مصفوفة ضغط 16×8 موزعة تشريحيًا على مناطق الجسم الكاملة
   • درجة حرارة سطح المفرش (°م / °C)
   • الرطوبة النسبية (%)
+  • بيانات التتبع الزمني المُسرّع (كل قراءة مستمرة = ١ ساعة مراقبة، مع دعم محاكاة الحركة العابرة بالثواني)
 
-يعتمد مفاتيح داخلية ثابتة (Internal Keys) للسيناريوهات السبعة مع قاموس ترجمة منظم (ar / en).
+يعتمد مفاتيح داخلية ثابتة (Internal Keys) للسيناريوهات الثمانية مع قاموس ترجمة منظم (ar / en).
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ LangType = Literal["ar", "en"]
 
 ScenarioKey = Literal[
     "normal",
+    "transient_motion",
     "pelvis_pressure",
     "heels_pressure",
     "lateral_pressure",
@@ -33,6 +35,7 @@ ScenarioKey = Literal[
 ScenarioType = ScenarioKey
 _LEGACY_SCENARIO_MAP: dict[str, ScenarioKey] = {
     "طبيعي": "normal",
+    "حركة_عابرة": "transient_motion",
     "ضغط_حوض": "pelvis_pressure",
     "ضغط_كعبين": "heels_pressure",
     "ضغط_جانبي": "lateral_pressure",
@@ -49,8 +52,19 @@ SCENARIO_CATALOG: dict[ScenarioKey, dict] = {
             "en": "Normal Baseline Scenario",
         },
         "description": {
-            "ar": "توزيع ضغط متوازن على مناطق الجسم وحرارة ورطوبة ضمن النمط الطبيعي للمريض.",
-            "en": "Balanced full-body pressure distribution with surface temperature and humidity within the patient's normal baseline.",
+            "ar": "توزيع ضغط متوازن على مناطق الجسم وحرارة ورطوبة ضمن النمط الطبيعي للمريض عبر ساعات المراقبة.",
+            "en": "Balanced full-body pressure distribution with surface temperature and humidity within the patient's normal baseline across monitoring hours.",
+        },
+    },
+    "transient_motion": {
+        "badge_tone": "cold",
+        "label": {
+            "ar": "حركة عابرة / تقلّب لحظي (اختبار منع الإنذار الكاذب)",
+            "en": "Transient Movement / Brief Shift (False-Alarm Filter)",
+        },
+        "description": {
+            "ar": "تقلّب طبيعي أو تعديل لحظي لوضعية المريض لبضع ثوانٍ؛ يرتفع الضغط عابرًا فيتجاهله النظام ولا يزيد عدّاد الساعات المستمرة.",
+            "en": "Brief natural posture shift lasting seconds; causes a momentary pressure spike that is ignored without incrementing continuous hours.",
         },
     },
     "pelvis_pressure": {
@@ -60,30 +74,30 @@ SCENARIO_CATALOG: dict[ScenarioKey, dict] = {
             "en": "Sustained Pelvic Pressure",
         },
         "description": {
-            "ar": "ارتفاع مستمر ومتصاعد للضغط في منطقة الحوض والعجز (الصفوف ٧–١٠).",
-            "en": "Sustained, progressively rising pressure concentrated over the pelvis and sacral area (rows 7–10).",
+            "ar": "تركّز مستمر ومتصاعد للضغط في منطقة الحوض والعجز (الصفوف ٧–١٠) عبر ساعات متواصلة.",
+            "en": "Sustained, progressively rising pressure concentrated over the pelvis and sacral area (rows 7–10) across continuous hours.",
         },
     },
     "heels_pressure": {
         "badge_tone": "danger",
         "label": {
-            "ar": "ضغط على الكعبين والساقين",
-            "en": "Heels & Lower Legs Pressure",
+            "ar": "ضغط مستمر على الكعبين والساقين",
+            "en": "Sustained Heels & Lower Legs Pressure",
         },
         "description": {
-            "ar": "تركّز الضغط في الصفوف السفلية لمنطقة الساقين والكعبين والقدمين (الصفوف ١٤–١٦).",
-            "en": "Localized pressure buildup across the lower legs, heels, and feet (rows 14–16).",
+            "ar": "تركّز مستمر للضغط في الصفوف السفلية لمنطقة الساقين والكعبين والقدمين (الصفوف ١٤–١٦).",
+            "en": "Sustained localized pressure buildup across the lower legs, heels, and feet (rows 14–16).",
         },
     },
     "lateral_pressure": {
         "badge_tone": "danger",
         "label": {
-            "ar": "ضغط جانبي على الكتف والذراع واليد",
-            "en": "Lateral Shoulder, Arm & Hand Pressure",
+            "ar": "ضغط جانبي مستمر على الكتف والذراع واليد",
+            "en": "Sustained Lateral Shoulder, Arm & Hand Pressure",
         },
         "description": {
-            "ar": "يحاكي استلقاء المريض طويلاً على جانب واحد مع ارتفاع الضغط على الكتف والذراع واليد.",
-            "en": "Simulates prolonged side-lying posture with elevated pressure along the shoulder, arm, and hand.",
+            "ar": "يحاكي استلقاء المريض لساعات متواصلة على جانب واحد مع ارتفاع الضغط على الكتف والذراع واليد.",
+            "en": "Simulates multi-hour side-lying posture with sustained pressure along the shoulder, arm, and hand.",
         },
     },
     "heat_sweat": {
@@ -93,8 +107,8 @@ SCENARIO_CATALOG: dict[ScenarioKey, dict] = {
             "en": "High Moisture, Sweating & Heat",
         },
         "description": {
-            "ar": "ارتفاع ملحوظ في رطوبة السطح وحرارته يستدعي التهوية والتبريد الآمن.",
-            "en": "Elevated surface moisture and temperature requiring active ventilation and safe cooling.",
+            "ar": "ارتفاع مستمر في رطوبة السطح وحرارته يستدعي التهوية والتبريد الآمن.",
+            "en": "Sustained elevated surface moisture and temperature requiring active ventilation and safe cooling.",
         },
     },
     "cold_surface": {
@@ -104,19 +118,19 @@ SCENARIO_CATALOG: dict[ScenarioKey, dict] = {
             "en": "Cold Surface / Low Temperature",
         },
         "description": {
-            "ar": "انخفاض غير معتاد في حرارة سطح المفرش يستدعي التدفئة الآمنة.",
-            "en": "Unusual drop in mattress surface temperature requiring safe medical warming.",
+            "ar": "انخفاض مستمر وغير معتاد في حرارة سطح المفرش يستدعي التدفئة الآمنة.",
+            "en": "Sustained unusual drop in mattress surface temperature requiring safe medical warming.",
         },
     },
     "compound_risk": {
         "badge_tone": "critical",
         "label": {
-            "ar": "خطر مركّب (ضغط + رطوبة + حرارة)",
-            "en": "Compound Risk (Pressure + Moisture + Heat)",
+            "ar": "خطر مركّب (ضغط مستمر + رطوبة + حرارة)",
+            "en": "Compound Risk (Sustained Pressure + Moisture + Heat)",
         },
         "description": {
-            "ar": "سيناريو طارئ يجمع بين الضغط المستمر والتعرق وارتفاع الحرارة (أعلى خطر لتقرحات الجلد).",
-            "en": "Emergency scenario combining sustained pelvic pressure with sweating and elevated heat (highest ulcer risk).",
+            "ar": "سيناريو طارئ يجمع بين الضغط المستمر لساعات والتعرق وارتفاع الحرارة (أعلى خطر لتقرحات الجلد).",
+            "en": "Emergency scenario combining multi-hour pelvic pressure with sweating and elevated heat (highest ulcer risk).",
         },
     },
 }
@@ -164,11 +178,19 @@ def get_scenario_description(scenario: str, lang: LangType = "ar") -> str:
 
 @dataclass
 class SensorReading:
-    """قراءة واحدة من حساسات المفرش الطبي الذكي."""
+    """
+    قراءة واحدة من حساسات المفرش الطبي الذكي.
+    في وضع المحاكاة الزمنية المُسرّعة:
+      • القراءة الاعتيادية تمثّل 1.0 ساعة مراقبة مستمرة (duration_hours = 1.0).
+      • قراءة الحركة العابرة تمثّل ارتفاعاً لحظياً لثوانٍ معدودة (is_transient = True, duration_hours = 0.0).
+    """
     pressure_matrix: np.ndarray          # shape (16, 8)
     temperature: float                   # °C
     humidity: float                      # %
     scenario: ScenarioKey
+    duration_hours: float = 1.0
+    is_transient: bool = False
+    transient_seconds: int = 0
 
 
 def get_cell_region_key(row: int, col: int) -> str:
@@ -242,17 +264,42 @@ def generate_reading(
     climate_mode: Literal["off", "cool", "heat"] = "off",
     climate_steps: int = 0,
     target_temp: float = 34.0,
+    transient_override: bool | None = None,
 ) -> SensorReading:
     """
-    تولّد قراءة واحدة حسب مفتاح السيناريو الداخلي ورقم الخطوة الزمنية،
-    مع محاكاة الأثر التدريجي الواقعي لوحدة التهوية والتبريد أو التدفئة الآمنة.
+    تولّد قراءة واحدة حسب مفتاح السيناريو الداخلي ورقم الخطوة الزمنية:
+      • في السيناريوهات المستمرة: تمثّل القراءة ساعة مراقبة واحدة (duration_hours = 1.0).
+      • في سيناريو الحركة العابرة: تمثّل تقلّبًا لحظيًا لثوانٍ معدودة (is_transient = True, duration_hours = 0.0).
     """
     scn = normalize_scenario_key(scenario)
     pressure = _base_pressure()
     temp = np.random.normal(loc=34.0, scale=0.35)
     humidity = np.random.normal(loc=55.0, scale=2.8)
+    duration_hours = 1.0
+    is_transient = False
+    transient_seconds = 0
 
-    if scn == "pelvis_pressure":
+    if scn == "transient_motion":
+        is_transient = True
+        duration_hours = 0.0
+        transient_seconds = 18 + ((step * 11) % 33)  # ما بين 18 و 50 ثانية
+        phase = step % 3
+        if phase == 0:
+            # ارتكاز عابر لحظي على الحوض أثناء تعديل الجلسة
+            pressure[6:10, 2:6] = np.random.normal(loc=58.5, scale=2.2, size=(4, 4))
+        elif phase == 1:
+            # دفع لحظي بالكعبين والساقين لثوانٍ أثناء الحركة في السرير
+            pressure[13:14, 2:6] = np.random.normal(loc=46.5, scale=2.0, size=(1, 4))
+            pressure[14:16, 2:6] = np.random.normal(loc=61.0, scale=2.2, size=(2, 4))
+        else:
+            # تقلّب جانبي قصير على الكتف والذراع الأيمن ثم الاستقرار
+            pressure[:, 5:8] = np.random.normal(loc=8.8, scale=1.3, size=(ROWS, 3))
+            pressure[2:4, 0:3] = np.random.normal(loc=59.5, scale=2.2, size=(2, 3))
+            pressure[3:9, 0:2] = np.random.normal(loc=54.5, scale=2.1, size=(6, 2))
+        temp = np.random.normal(loc=34.1, scale=0.32)
+        humidity = np.random.normal(loc=55.5, scale=2.5)
+
+    elif scn == "pelvis_pressure":
         intensity = min(35.0 + step * 2.0, 65.0)
         pressure[6:10, 2:6] = np.random.normal(
             loc=29.0 + intensity, scale=2.2, size=(4, 4)
@@ -307,6 +354,16 @@ def generate_reading(
         temp = np.random.normal(loc=base_temp, scale=0.25)
         humidity = np.random.normal(loc=base_hum, scale=2.0)
 
+    if transient_override is True:
+        is_transient = True
+        duration_hours = 0.0
+        if transient_seconds == 0:
+            transient_seconds = 30
+    elif transient_override is False:
+        is_transient = False
+        duration_hours = 1.0
+        transient_seconds = 0
+
     safe_target = float(np.clip(target_temp, 32.5, 36.0))
     if climate_mode == "cool" and climate_steps > 0:
         alpha = min(climate_steps * 0.10, 0.80)
@@ -329,6 +386,9 @@ def generate_reading(
         temperature=round(temp, 1),
         humidity=round(humidity, 1),
         scenario=scn,
+        duration_hours=duration_hours,
+        is_transient=is_transient,
+        transient_seconds=transient_seconds,
     )
 
 

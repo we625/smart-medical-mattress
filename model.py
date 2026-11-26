@@ -1,12 +1,13 @@
 """
-model.py – نموذج كشف الشذوذ والتشخيص الذكي للمناطق والتوصيات (ثنائي اللغة ar / en)
+model.py – نموذج كشف الشذوذ والتتبع الزمني بالساعات وفلترة الإنذارات الكاذبة (ثنائي اللغة ar / en)
 
 يستخدم Isolation Forest من scikit-learn:
-  • يتدرب على بيانات السيناريو الطبيعي فقط.
+  • يتدرب على 600 قراءة من السيناريو الطبيعي فقط.
   • يكشف الشذوذ في توزيع الضغط (في أي منطقة من الجسم) أو الحرارة أو الرطوبة.
-  • يحدد تلقائيًا المنطقة المتأثرة بالضغط وسبب التنبيه وتوصية الإجراء للممرض بمفاتيح داخلية ثابتة
-    قابلة للعرض الفوري بالعربية أو الإنجليزية دون المساس بحالة الجلسة.
-  • لا يُطلق تنبيهًا إلا إذا استمر الشذوذ لعدة قراءات متتالية لتجنب التنبيهات الكاذبة.
+  • يطبّق فلترة ذكية لمنع الإنذارات الكاذبة: إذا تحرّك المريض أو تقلّب بشكل عابر لثوانٍ أو دقائق،
+    يُعدّ ذلك حركة طبيعية لا تزيد عدّاد الساعات المستمرة ولا تُطلق إنذاراً.
+  • يتتبع استمرار الضغط أو الشذوذ على نفس المنطقة بالساعات (كل قراءة مستمرة = 1 ساعة في المحاكاة المُسرّعة)،
+    ويُطلق التنبيه التمريضي فور بلوغ 4 ساعات متواصلة.
 """
 
 from __future__ import annotations
@@ -18,12 +19,13 @@ from sklearn.ensemble import IsolationForest
 
 from simulator import LangType, SensorReading, generate_batch
 
-# ───────── عتبات تفسير المؤشرات السطحية (للتشخيص الداعم للقرار) ─────────
+# ───────── عتبات تفسير المؤشرات السطحية والتتبع الزمني ─────────
 
-ZONE_PRESSURE_THRESHOLD = 45.0   # mmHg
-HIGH_TEMP_THRESHOLD = 36.0       # °C
-LOW_TEMP_THRESHOLD = 32.2        # °C
-HIGH_HUMIDITY_THRESHOLD = 68.0   # %
+DEFAULT_SUSTAINED_HOURS = 4          # 4 ساعات متواصلة لإطلاق التنبيه التمريضي
+ZONE_PRESSURE_THRESHOLD = 45.0       # mmHg
+HIGH_TEMP_THRESHOLD = 36.0           # °C
+LOW_TEMP_THRESHOLD = 32.2            # °C
+HIGH_HUMIDITY_THRESHOLD = 68.0       # %
 
 ZONE_NAMES: dict[str, dict[LangType, str]] = {
     "pelvis": {"ar": "الحوض", "en": "Pelvis"},
@@ -43,6 +45,7 @@ RISK_LABELS: dict[str, dict[LangType, str]] = {
     "localized_pressure": {"ar": "ضغط موضعي", "en": "Localized Pressure"},
     "heat_humidity": {"ar": "حرارة ورطوبة", "en": "Heat & Moisture"},
     "cold_surface": {"ar": "برودة سطحية", "en": "Cold Surface"},
+    "transient_motion": {"ar": "حركة عابرة", "en": "Transient Motion"},
     "normal": {"ar": "طبيعي", "en": "Normal"},
     "general_anomaly": {"ar": "انحراف عام", "en": "Pattern Deviation"},
 }
@@ -55,30 +58,38 @@ SEVERITY_LABELS: dict[str, dict[LangType, str]] = {
 
 PRESSURE_RECOMMENDATIONS: dict[str, dict[LangType, str]] = {
     "pelvis": {
-        "ar": "تغيير وضعية المريض (إمالة جانبية بزاوية ٣٠°) لتخفيف الضغط المستمر عن منطقة الحوض والعجز.",
-        "en": "Reposition the patient (30° lateral tilt) to relieve sustained pressure off the pelvis and sacrum.",
+        "ar": "تغيير وضعية المريض الآن (إمالة جانبية بزاوية ٣٠°) لتخفيف الضغط المستمر عن منطقة الحوض والعجز.",
+        "en": "Reposition the patient now (30° lateral tilt) to relieve sustained pressure off the pelvis and sacrum.",
     },
     "heels_legs": {
-        "ar": "رفع الكعبين عن سطح المفرش بوضع وسادة داعمة أسفل الساقين وتخفيف الحمل عن القدمين.",
-        "en": "Offload the heels by placing a supportive pillow beneath the calves to relieve lower-limb pressure.",
+        "ar": "تغيير وضعية المريض الآن ورفع الكعبين عن سطح المفرش بوضع وسادة داعمة أسفل الساقين.",
+        "en": "Reposition now and offload the heels by placing a supportive pillow beneath the calves.",
     },
     "right_lateral": {
-        "ar": "تغيير وضعية المريض من الاستلقاء الجانبي إلى وضعية متوازنة وتحرير الكتف والذراع واليد من الضغط.",
-        "en": "Shift the patient from prolonged side-lying to a balanced posture and relieve the right shoulder, arm, and hand.",
+        "ar": "تغيير وضعية المريض الآن من الاستلقاء الجانبي إلى وضعية متوازنة وتحرير الكتف والذراع واليد من الضغط.",
+        "en": "Reposition the patient now from prolonged side-lying to a balanced posture and offload the right shoulder, arm, and hand.",
     },
     "left_lateral": {
-        "ar": "تغيير وضعية المريض من الاستلقاء الجانبي إلى وضعية متوازنة وتحرير الكتف والذراع واليد من الضغط.",
-        "en": "Shift the patient from prolonged side-lying to a balanced posture and relieve the left shoulder, arm, and hand.",
+        "ar": "تغيير وضعية المريض الآن من الاستلقاء الجانبي إلى وضعية متوازنة وتحرير الكتف والذراع واليد من الضغط.",
+        "en": "Reposition the patient now from prolonged side-lying to a balanced posture and offload the left shoulder, arm, and hand.",
     },
     "shoulders": {
-        "ar": "تعديل زاوية الجزء العلوي للجسم وإعادة توزيع الارتكاز عن منطقة الكتفين.",
-        "en": "Adjust upper-body elevation angle and redistribute weight away from the shoulders.",
+        "ar": "تغيير وضعية المريض وتعديل زاوية الجزء العلوي للجسم لإعادة توزيع الارتكاز عن منطقة الكتفين.",
+        "en": "Reposition the patient and adjust upper-body elevation angle to redistribute weight off the shoulders.",
     },
     "back": {
-        "ar": "إمالة المريض جزئيًا بوسائد ساندة لتخفيف الضغط المتواصل عن منطقة الظهر.",
-        "en": "Apply gentle lateral support pillows to relieve continuous pressure along the back.",
+        "ar": "إمالة المريض جزئيًا بوسائد ساندة الآن لتخفيف الضغط المتواصل عن منطقة الظهر.",
+        "en": "Apply lateral support pillows now to relieve continuous pressure along the back.",
     },
 }
+
+
+def _hours_phrase_ar(hours: int) -> str:
+    """يصوغ عبارة عدد الساعات المتواصلة بالعربية بصورة سليمة."""
+    h = max(int(hours), 1)
+    if 3 <= h <= 10:
+        return f"{h} ساعات متواصلة"
+    return f"{h} ساعة متواصلة"
 
 
 def _zone_slices(mat: np.ndarray) -> list[dict]:
@@ -186,8 +197,8 @@ def _pressure_recommendation(zone_key: str, lang: LangType = "ar") -> str:
         return PRESSURE_RECOMMENDATIONS[zone_key][lang]
     zname = ZONE_NAMES.get(zone_key, {"ar": zone_key, "en": zone_key})[lang]
     if lang == "en":
-        return f"Reposition the patient and redistribute support points to relieve pressure on the {zname}."
-    return f"تغيير وضعية المريض وإعادة توزيع نقاط الارتكاز لتخفيف الضغط عن منطقة {zname}."
+        return f"Reposition the patient now and redistribute support points to relieve pressure on the {zname}."
+    return f"تغيير وضعية المريض الآن وإعادة توزيع نقاط الارتكاز لتخفيف الضغط عن منطقة {zname}."
 
 
 def _build_clinical_texts(
@@ -201,11 +212,41 @@ def _build_clinical_texts(
     high_temp: bool,
     high_hum: bool,
     lang: LangType,
+    sustained_hours: int = 0,
+    is_transient: bool = False,
+    transient_seconds: int = 0,
+    alert_mode: bool = False,
 ) -> tuple[str, str, str, str]:
     """يُرجع (region_str, risk_label, cause, recommendation) باللغة المطلوبة."""
     sep = "، " if lang == "ar" else ", "
     affected_labels = [ZONE_NAMES[k][lang] for k in elevated_keys]
-    risk_label = RISK_LABELS[risk_key][lang]
+
+    if is_transient:
+        risk_label = RISK_LABELS["transient_motion"][lang]
+        region_str = sep.join(affected_labels) if affected_labels else ZONE_NAMES["balanced"][lang]
+        secs = transient_seconds if transient_seconds > 0 else 30
+        if lang == "en":
+            cause = (
+                f"Brief natural movement on {region_str} ({secs}s momentary spike) — "
+                "Ignored by false-alarm filter (0 sustained hours)"
+            )
+            recommendation = (
+                "No nursing action required; brief posture shifts are healthy natural movements "
+                "and do not increment the sustained hours counter."
+            )
+        else:
+            cause = (
+                f"حركة طبيعية عابرة على {region_str} (ارتفاع لحظي لمدة {secs} ثانية) — "
+                "تم تجاهلها لمنع الإنذار الكاذب (٠ ساعة مستمرة)"
+            )
+            recommendation = (
+                "لا يلزم أي تدخل تمريضي؛ التقلّب العابر القصير حركة طبيعية ولا يزيد عدّاد الساعات المستمرة."
+            )
+        return region_str, risk_label, cause, recommendation
+
+    risk_label = RISK_LABELS.get(risk_key, RISK_LABELS["normal"])[lang]
+    hrs = max(int(sustained_hours), DEFAULT_SUSTAINED_HOURS) if alert_mode else int(sustained_hours)
+    hr_phrase_ar = _hours_phrase_ar(hrs) if hrs > 0 else ""
 
     if risk_key == "compound":
         region_str = sep.join(affected_labels)
@@ -215,12 +256,18 @@ def _build_clinical_texts(
                 env_parts.append(f"elevated heat ({temp:.1f} °C)")
             if high_hum:
                 env_parts.append(f"sweating & high moisture ({hum:.1f}%)")
-            cause = (
-                f"Compound skin-ulcer risk: sustained pressure on {region_str} "
-                f"({primary_mean:.1f} mmHg) combined with {' and '.join(env_parts)}"
-            )
+            if alert_mode:
+                cause = (
+                    f"Sustained pressure on {region_str} for {hrs} continuous hours "
+                    f"with {' and '.join(env_parts)} — Reposition patient now"
+                )
+            else:
+                cause = (
+                    f"Compound skin-ulcer risk: sustained pressure on {region_str} "
+                    f"({primary_mean:.1f} mmHg) combined with {' and '.join(env_parts)}"
+                )
             recommendation = (
-                f"Immediate nursing action: reposition patient to offload {region_str}, "
+                f"Immediate nursing action: reposition patient now to offload {region_str}, "
                 "activate safe cooling & ventilation, dry the skin, and inspect contact tissue."
             )
         else:
@@ -229,32 +276,51 @@ def _build_clinical_texts(
                 env_parts.append(f"حرارة مرتفعة ({temp:.1f} °م)")
             if high_hum:
                 env_parts.append(f"تعرق ورطوبة مرتفعة ({hum:.1f}%)")
-            cause = (
-                f"خطر مركّب لتقرحات الجلد: ضغط مستمر على {region_str} "
-                f"({primary_mean:.1f} ملم زئبق) متزامن مع {' و'.join(env_parts)}"
-            )
+            if alert_mode:
+                cause = (
+                    f"استمر تركز الضغط على {region_str} لمدة {hr_phrase_ar} متزامناً مع "
+                    f"{' و'.join(env_parts)} — يجب تغيير وضعية المريض الآن"
+                )
+            else:
+                cause = (
+                    f"خطر مركّب لتقرحات الجلد: ضغط مستمر على {region_str} "
+                    f"({primary_mean:.1f} ملم زئبق) متزامن مع {' و'.join(env_parts)}"
+                )
             recommendation = (
-                f"تدخّل تمريضي فوري: تغيير وضعية المريض لتخفيف الضغط عن {region_str}، "
+                f"تدخّل تمريضي فوري: تغيير وضعية المريض الآن لتخفيف الضغط عن {region_str}، "
                 "وتفعيل التهوية والتبريد الآمن مع تجفيف الجلد وفحص موضع التلامس."
             )
+
     elif risk_key == "localized_pressure":
         region_str = sep.join(affected_labels)
         primary_key = elevated_keys[0]
         if lang == "en":
-            cause = (
-                f"Sustained elevated pressure on {region_str} "
-                f"(mean {primary_mean:.1f} mmHg, peak {primary_max:.1f} mmHg)"
-            )
+            if alert_mode:
+                cause = f"Sustained pressure on {region_str} for {hrs} continuous hours — Reposition patient now"
+            else:
+                cause = (
+                    f"Elevated pressure on {region_str} "
+                    f"(mean {primary_mean:.1f} mmHg, peak {primary_max:.1f} mmHg)"
+                )
         else:
-            cause = (
-                f"ارتفاع مستمر للضغط على منطقة {region_str} "
-                f"(متوسط {primary_mean:.1f} ملم زئبق، الأقصى {primary_max:.1f} ملم زئبق)"
-            )
+            if alert_mode:
+                cause = f"استمر تركز الضغط على {region_str} لمدة {hr_phrase_ar} — يجب تغيير وضعية المريض الآن"
+            else:
+                cause = (
+                    f"تركّز ضغط مرتفع على منطقة {region_str} "
+                    f"(متوسط {primary_mean:.1f} ملم زئبق، الأقصى {primary_max:.1f} ملم زئبق)"
+                )
         recommendation = _pressure_recommendation(primary_key, lang)
+
     elif risk_key == "heat_humidity":
         region_str = ZONE_NAMES["full_surface"][lang]
         if lang == "en":
-            if high_temp and high_hum:
+            if alert_mode:
+                cause = (
+                    f"Sustained elevated moisture/heat on {region_str} ({hum:.1f}% · {temp:.1f} °C) "
+                    f"for {hrs} continuous hours — Activate safe cooling & inspect skin now"
+                )
+            elif high_temp and high_hum:
                 cause = f"Sweating with elevated surface moisture ({hum:.1f}%) and temperature ({temp:.1f} °C)"
             elif high_hum:
                 cause = f"Elevated mattress surface moisture ({hum:.1f}%)"
@@ -264,31 +330,57 @@ def _build_clinical_texts(
                 "Activate safe mattress ventilation & cooling, and verify skin and linen dryness to prevent maceration."
             )
         else:
-            if high_temp and high_hum:
+            if alert_mode:
+                cause = (
+                    f"استمر ارتفاع رطوبة وحرارة {region_str} ({hum:.1f}% · {temp:.1f} °م) "
+                    f"لمدة {hr_phrase_ar} — يجب تفعيل التهوية والتبريد الآمن وفحص الجلد الآن"
+                )
+            elif high_temp and high_hum:
                 cause = f"تعرق وارتفاع ملحوظ في رطوبة السطح ({hum:.1f}%) وحرارته ({temp:.1f} °م)"
             elif high_hum:
                 cause = f"ارتفاع ملحوظ في رطوبة سطح المفرش ({hum:.1f}%)"
             else:
                 cause = f"ارتفاع ملحوظ في حرارة سطح المفرش ({temp:.1f} °م)"
             recommendation = "تفعيل التهوية والتبريد الآمن للمفرش، والتحقق من جفاف الجلد والأغطية للوقاية من تهيّج البشرة."
+
     elif risk_key == "cold_surface":
         region_str = ZONE_NAMES["full_surface"][lang]
         if lang == "en":
-            cause = f"Unusual coolness and drop in mattress surface temperature ({temp:.1f} °C)"
+            if alert_mode:
+                cause = (
+                    f"Sustained low temperature on {region_str} ({temp:.1f} °C) "
+                    f"for {hrs} continuous hours — Activate safe warming & check patient now"
+                )
+            else:
+                cause = f"Unusual coolness and drop in mattress surface temperature ({temp:.1f} °C)"
             recommendation = "Activate safe mattress warming and check the patient's blankets and core thermal comfort."
         else:
-            cause = f"برودة وانخفاض غير معتاد في حرارة سطح المفرش ({temp:.1f} °م)"
+            if alert_mode:
+                cause = (
+                    f"استمر انخفاض حرارة {region_str} ({temp:.1f} °م) "
+                    f"لمدة {hr_phrase_ar} — يجب تفعيل التدفئة الآمنة وتفقّد المريض الآن"
+                )
+            else:
+                cause = f"برودة وانخفاض غير معتاد في حرارة سطح المفرش ({temp:.1f} °م)"
             recommendation = "تفعيل التدفئة الآمنة للمفرش وتفقّد أغطية المريض ودرجة حرارته الحيوية."
+
     elif risk_key == "general_anomaly":
         top_name = ZONE_NAMES[top_zone_key][lang]
         if lang == "en":
             region_str = f"Peak Zone: {top_name}"
-            cause = "Repeated pattern deviation from the patient's learned normal baseline"
+            if alert_mode:
+                cause = f"Sustained pattern deviation near {top_name} for {hrs} continuous hours — Reposition patient now"
+            else:
+                cause = "Pattern deviation from the patient's learned normal baseline"
             recommendation = "Check patient posture and review surface pressure, temperature, and humidity indicators."
         else:
             region_str = f"أعلى ضغط: {top_name}"
-            cause = "انحراف متكرر في نمط القراءات عن خط الأساس الطبيعي للمريض"
+            if alert_mode:
+                cause = f"استمر انحراف نمط القراءات عند {top_name} لمدة {hr_phrase_ar} — يجب تغيير وضعية المريض الآن"
+            else:
+                cause = "انحراف في نمط القراءات عن خط الأساس الطبيعي للمريض"
             recommendation = "تفقّد وضعية المريض ومراجعة مؤشرات الضغط والحرارة والرطوبة."
+
     else:
         region_str = ZONE_NAMES["balanced"][lang]
         if lang == "en":
@@ -319,6 +411,9 @@ def analyze_reading(reading: SensorReading, lang: LangType = "ar") -> dict:
     elevated_keys = [z["key"] for z in elevated]
     highlight_shapes = [z["shape"] for z in elevated]
 
+    is_transient = bool(getattr(reading, "is_transient", False) or getattr(reading, "duration_hours", 1.0) < 1.0)
+    transient_seconds = int(getattr(reading, "transient_seconds", 0))
+
     if has_pressure and (high_temp or high_hum):
         risk_key = "compound"
     elif has_pressure:
@@ -344,6 +439,9 @@ def analyze_reading(reading: SensorReading, lang: LangType = "ar") -> dict:
         high_temp=high_temp,
         high_hum=high_hum,
         lang=lang,
+        is_transient=is_transient,
+        transient_seconds=transient_seconds,
+        alert_mode=False,
     )
 
     return {
@@ -363,9 +461,11 @@ def analyze_reading(reading: SensorReading, lang: LangType = "ar") -> dict:
         "humidity": reading.humidity,
         "high_temp": high_temp,
         "high_hum": high_hum,
+        "is_transient": is_transient,
+        "transient_seconds": transient_seconds,
         "cause": cause,
         "recommendation": recommendation,
-        "is_compound": bool(has_pressure and (high_temp or high_hum)),
+        "is_compound": bool(has_pressure and (high_temp or high_hum) and not is_transient),
     }
 
 
@@ -382,6 +482,9 @@ def localize_analysis(analysis: dict, lang: LangType = "ar") -> dict:
         high_temp=analysis["high_temp"],
         high_hum=analysis["high_hum"],
         lang=lang,
+        is_transient=bool(analysis.get("is_transient", False)),
+        transient_seconds=int(analysis.get("transient_seconds", 0)),
+        alert_mode=False,
     )
     out = dict(analysis)
     out["risk_type"] = risk_label
@@ -409,6 +512,8 @@ class AlertRecord:
     primary_max: float = 0.0
     high_temp: bool = False
     high_hum: bool = False
+    sustained_hours: int = DEFAULT_SUSTAINED_HOURS
+    simulated_hour: int = 0
     region: str = "—"
     cause: str = ""
     recommendation: str = ""
@@ -420,6 +525,7 @@ def localize_alert(alert: AlertRecord, lang: LangType = "ar") -> dict:
     d = alert.details
     temp = float(d.get("الحرارة", 34.0))
     hum = float(d.get("الرطوبة", 55.0))
+    sustained_hrs = int(alert.sustained_hours or d.get("ساعات_الاستمرار", DEFAULT_SUSTAINED_HOURS))
     region_str, _, cause, recommendation = _build_clinical_texts(
         risk_key=alert.risk_key,
         elevated_keys=alert.elevated_keys,
@@ -431,6 +537,13 @@ def localize_alert(alert: AlertRecord, lang: LangType = "ar") -> dict:
         high_temp=alert.high_temp,
         high_hum=alert.high_hum,
         lang=lang,
+        sustained_hours=sustained_hrs,
+        alert_mode=True,
+    )
+    time_display = (
+        f"H+{alert.simulated_hour:02d}:00 ({alert.timestamp})"
+        if alert.simulated_hour > 0
+        else alert.timestamp
     )
     return {
         "severity_key": alert.severity_key,
@@ -438,8 +551,9 @@ def localize_alert(alert: AlertRecord, lang: LangType = "ar") -> dict:
         "region": region_str,
         "cause": cause,
         "recommendation": recommendation,
-        "timestamp": alert.timestamp,
-        "consecutive": d.get("قراءات_متتالية", "—"),
+        "timestamp": time_display,
+        "sustained_hours": sustained_hrs,
+        "consecutive": sustained_hrs,
         "peak_pressure": d.get("أقصى_ضغط", "—"),
         "temperature": d.get("الحرارة", "—"),
         "humidity": d.get("الرطوبة", "—"),
@@ -449,23 +563,41 @@ def localize_alert(alert: AlertRecord, lang: LangType = "ar") -> dict:
 
 class SmartMattressModel:
     """
-    يغلّف Isolation Forest المتدرّب على النمط الطبيعي فقط مع منطق التنبيه المتتالي.
+    يغلّف Isolation Forest المتدرّب على 600 قراءة طبيعية مع:
+      • فلترة الحركات العابرة اللحظية (ثوانٍ/دقائق) لمنع الإنذارات الكاذبة.
+      • تتبّع مدة استمرار الضغط أو الشذوذ على نفس المنطقة بالساعات (عتبة افتراضية: 4 ساعات متواصلة).
     """
 
-    def __init__(self, consecutive_threshold: int = 3,
-                 contamination: float = 0.03):
-        self.consecutive_threshold = consecutive_threshold
+    def __init__(
+        self,
+        sustained_hours_threshold: int = DEFAULT_SUSTAINED_HOURS,
+        contamination: float = 0.03,
+        consecutive_threshold: int | None = None,
+    ):
+        if consecutive_threshold is not None:
+            sustained_hours_threshold = consecutive_threshold
+        self.sustained_hours_threshold: int = sustained_hours_threshold
         self.model = IsolationForest(
             n_estimators=200,
             contamination=contamination,
             random_state=42,
         )
-        self._consecutive_anomalies: int = 0
+        self._sustained_hours: int = 0
+        self._active_target_key: str | None = None
+        self._simulated_elapsed_hours: int = 0
         self.alerts: list[AlertRecord] = []
         self._is_trained: bool = False
 
+    @property
+    def consecutive_threshold(self) -> int:
+        return self.sustained_hours_threshold
+
+    @consecutive_threshold.setter
+    def consecutive_threshold(self, value: int) -> None:
+        self.sustained_hours_threshold = value
+
     def train(self, n_normal: int = 600) -> None:
-        """يتدرب على بيانات السيناريو الطبيعي فقط."""
+        """يتدرب على 600 قراءة من السيناريو الطبيعي فقط."""
         normal_data = generate_batch("normal", n=n_normal)
         X = extract_features_batch(normal_data)
         self.model.fit(X)
@@ -473,8 +605,11 @@ class SmartMattressModel:
 
     def predict(self, reading: SensorReading) -> dict:
         """
-        يفحص قراءة واحدة، ويحدّث عدّاد الشذوذ المتتالي، ولا يُطلق التنبيه
-        إلا عند استمرار الشذوذ لـ consecutive_threshold قراءات متتالية.
+        يفحص قراءة واحدة:
+          • إذا كانت حركة عابرة لحظية (is_transient أو duration_hours < 1.0): يتجاهلها كحركة طبيعية
+            ولا يزيد عدّاد الساعات المستمرة ولا يُطلق إنذاراً.
+          • إذا كانت قراءة مراقبة مستمرة (1 ساعة): يتحقق من استمرار الشذوذ على نفس المنطقة،
+            ويُطلق التنبيه التمريضي فور بلوغ 4 ساعات متواصلة.
         """
         if not self._is_trained:
             self.train()
@@ -482,15 +617,45 @@ class SmartMattressModel:
         features = extract_features(reading).reshape(1, -1)
         label = self.model.predict(features)[0]
         score = float(self.model.decision_function(features)[0])
-        is_anomaly = bool(label == -1)
+        raw_is_anomaly = bool(label == -1)
         analysis = analyze_reading(reading, lang="ar")
 
-        if is_anomaly:
-            self._consecutive_anomalies += 1
-        else:
-            self._consecutive_anomalies = 0
+        duration_hrs = float(getattr(reading, "duration_hours", 1.0))
+        is_transient_spike = bool(getattr(reading, "is_transient", False) or duration_hrs < 1.0)
+        transient_secs = int(getattr(reading, "transient_seconds", 0))
 
-        alert_triggered = self._consecutive_anomalies >= self.consecutive_threshold
+        if is_transient_spike:
+            # حركة طبيعية عابرة (ثوانٍ/دقائق): لا تزيد عدّاد الساعات المستمرة ولا تُطلق إنذاراً
+            if getattr(reading, "scenario", "") == "transient_motion":
+                self._sustained_hours = 0
+                self._active_target_key = None
+            is_anomaly = False
+            transient_ignored = True
+            alert_triggered = False
+        else:
+            transient_ignored = False
+            hour_step = max(1, int(round(duration_hrs)))
+            self._simulated_elapsed_hours += hour_step
+            is_anomaly = raw_is_anomaly
+
+            if is_anomaly:
+                if analysis["elevated_keys"]:
+                    target_key = f"zone:{analysis['elevated_keys'][0]}"
+                else:
+                    rk = analysis["risk_key"] if analysis["risk_key"] != "normal" else "general_anomaly"
+                    target_key = f"env:{rk}"
+
+                if self._active_target_key == target_key:
+                    self._sustained_hours += hour_step
+                else:
+                    # تغيّرت المنطقة أو بدأ شذوذ جديد: يبدأ العدّ من الساعة الأولى لهذه المنطقة
+                    self._active_target_key = target_key
+                    self._sustained_hours = hour_step
+            else:
+                self._sustained_hours = 0
+                self._active_target_key = None
+
+            alert_triggered = self._sustained_hours >= self.sustained_hours_threshold
 
         alert = None
         if alert_triggered:
@@ -500,7 +665,7 @@ class SmartMattressModel:
 
             if analysis["is_compound"]:
                 sev_key = "critical"
-            elif self._consecutive_anomalies >= self.consecutive_threshold + 2:
+            elif analysis["elevated_keys"] or self._sustained_hours >= self.sustained_hours_threshold + 2:
                 sev_key = "danger"
             else:
                 sev_key = "warn"
@@ -516,12 +681,14 @@ class SmartMattressModel:
                 high_temp=analysis["high_temp"],
                 high_hum=analysis["high_hum"],
                 lang="ar",
+                sustained_hours=self._sustained_hours,
+                alert_mode=True,
             )
             sev_ar = SEVERITY_LABELS[sev_key]["ar"]
 
             alert = AlertRecord(
                 timestamp=datetime.now().strftime("%H:%M:%S"),
-                message=f"{cause_ar} (مستمر منذ {self._consecutive_anomalies} قراءات متتالية)",
+                message=cause_ar,
                 severity=sev_ar,
                 severity_key=sev_key,
                 risk_key=eff_risk_key,
@@ -531,6 +698,8 @@ class SmartMattressModel:
                 primary_max=analysis["primary_max"],
                 high_temp=analysis["high_temp"],
                 high_hum=analysis["high_hum"],
+                sustained_hours=self._sustained_hours,
+                simulated_hour=self._simulated_elapsed_hours,
                 region=reg_ar,
                 cause=cause_ar,
                 recommendation=rec_ar,
@@ -541,14 +710,20 @@ class SmartMattressModel:
                     "الحرارة": reading.temperature,
                     "الرطوبة": reading.humidity,
                     "درجة_الشذوذ": round(score, 4),
-                    "قراءات_متتالية": self._consecutive_anomalies,
+                    "ساعات_الاستمرار": self._sustained_hours,
+                    "قراءات_متتالية": self._sustained_hours,
                 },
             )
             self.alerts.append(alert)
 
         return {
             "is_anomaly": is_anomaly,
-            "consecutive": self._consecutive_anomalies,
+            "raw_is_anomaly": raw_is_anomaly,
+            "transient_ignored": transient_ignored,
+            "transient_seconds": transient_secs,
+            "sustained_hours": self._sustained_hours,
+            "consecutive": self._sustained_hours,
+            "simulated_elapsed_hours": self._simulated_elapsed_hours,
             "alert_triggered": alert_triggered,
             "alert": alert,
             "score": round(score, 4),
@@ -556,8 +731,11 @@ class SmartMattressModel:
         }
 
     def reset_streak(self) -> None:
-        self._consecutive_anomalies = 0
+        self._sustained_hours = 0
+        self._active_target_key = None
 
     def reset(self) -> None:
-        self._consecutive_anomalies = 0
+        self._sustained_hours = 0
+        self._active_target_key = None
+        self._simulated_elapsed_hours = 0
         self.alerts.clear()
